@@ -1,0 +1,5 @@
+.env
+deurbel-data/
+eufy-data/
+app/data/
+*.zip

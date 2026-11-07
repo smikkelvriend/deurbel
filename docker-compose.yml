@@ -1,0 +1,62 @@
+# Deurbel — eigen app voor je Eufy-deurbel
+# Starten:  docker compose up -d --build     Logs:  docker compose logs -f
+name: deurbel
+
+services:
+  eufy:
+    image: bropat/eufy-security-ws:latest
+    container_name: eufy-security-ws
+    restart: unless-stopped
+    network_mode: host          # nodig voor de lokale verbinding met deurbel/HomeBase
+    environment:
+      USERNAME: ${EUFY_EMAIL}
+      PASSWORD: ${EUFY_PASSWORD}
+      COUNTRY: ${EUFY_COUNTRY:-NL}
+      LANGUAGE: nl
+      TRUSTED_DEVICE_NAME: deurbel-server
+      ACCEPT_INVITATIONS: "true"
+      EVENT_DURATION_SECONDS: "10"
+      STATION_IP_ADDRESSES: ${STATION_IP_ADDRESSES:-}
+      P2P_CONNECTION_SETUP: ${P2P_CONNECTION_SETUP:-0}
+      TZ: Europe/Amsterdam
+    volumes:
+      - ./eufy-data:/data
+
+  deurbel:
+    build: ./app
+    container_name: deurbel
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [eufy]
+    environment:
+      PORT: ${PORT:-8080}
+      EUFY_WS: ws://127.0.0.1:3000
+      APP_PIN: ${APP_PIN:-}
+      DEVICE_SERIAL: ${DEVICE_SERIAL:-}
+      NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      # Beginwaarden; daarna pas je dit aan in het dashboard (Instellingen)
+      STORAGE_GB: ${STORAGE_GB:-10}
+      AUTO_DOWNLOAD: ${AUTO_DOWNLOAD:-important}
+      TZ: Europe/Amsterdam
+    volumes:
+      - ./deurbel-data:/data
+
+  # Kijkt elke paar uur op GitHub of er een nieuwe versie is en werkt de app dan bij
+  updater:
+    image: docker:cli
+    container_name: deurbel-updater
+    restart: unless-stopped
+    entrypoint: ["sh", "${HOST_DIR:?Zet HOST_DIR in .env, zie README}/updater/update.sh"]
+    working_dir: ${HOST_DIR}
+    environment:
+      HOST_DIR: ${HOST_DIR}
+      UPDATE_HOURS: ${UPDATE_HOURS:-6}
+      AUTO_UPDATE: ${AUTO_UPDATE:-true}
+      UPDATE_EUFY: ${UPDATE_EUFY:-true}
+      TZ: Europe/Amsterdam
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_DIR}:${HOST_DIR}

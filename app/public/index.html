@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>Deurbel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #000; --card: #111; --card2: #1c1c1c; --line: #262626;
+    --fg: #fff; --dim: #8a8a8a; --red: #d71921; --ok: #4ade80;
+    --dot: "Doto", "Space Mono", ui-monospace, monospace;
+    --mono: "Space Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--mono); }
+  body { padding: env(safe-area-inset-top) 0 calc(80px + env(safe-area-inset-bottom)); min-height: 100vh; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 18px 16px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  h1 { font-family: var(--dot); font-weight: 900; font-size: 34px; letter-spacing: 1px; margin: 0; text-transform: uppercase; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
+  .led { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); flex: none; }
+  .led.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .led.bad { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; overflow: hidden; margin-bottom: 14px; }
+  .pad { padding: 16px; }
+  .view { position: relative; aspect-ratio: 4 / 3; background: #050505; display: flex; align-items: center; justify-content: center; }
+  .view img, .view video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .view .empty { color: var(--dim); font-size: 13px; text-align: center; padding: 20px; position: absolute; }
+  .badge { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,.65); border-radius: 999px; padding: 5px 11px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; display: flex; gap: 7px; align-items: center; backdrop-filter: blur(6px); }
+  .badge .led { width: 7px; height: 7px; }
+  .badge.live .led { background: var(--red); box-shadow: 0 0 8px var(--red); animation: blink 1.2s infinite; }
+  .ovl { position: absolute; display: flex; gap: 8px; }
+  .ovl.tr { top: 10px; right: 10px; } .ovl.br { bottom: 10px; right: 10px; }
+  .ib { width: 40px; height: 40px; flex: none; padding: 0; border-radius: 50%; background: rgba(0,0,0,.6); backdrop-filter: blur(6px); font-size: 17px; display: flex; align-items: center; justify-content: center; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .spinner { width: 34px; height: 34px; border: 3px solid #333; border-top-color: var(--fg); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .row { display: flex; gap: 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 999px; padding: 14px 18px; font-size: 13px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--fg); background: var(--card2); flex: 1; }
+  button.primary { background: var(--fg); color: #000; }
+  button.red { background: var(--red); }
+  button.small { padding: 9px 14px; font-size: 11px; flex: none; }
+  button:disabled { opacity: .4; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px; }
+  .stat .k { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
+  .stat .v { font-family: var(--dot); font-weight: 900; font-size: 26px; margin-top: 4px; white-space: nowrap; }
+  .sect { font-size: 11px; color: var(--dim); letter-spacing: 2px; text-transform: uppercase; margin: 22px 4px 10px; display: flex; justify-content: space-between; align-items: center; }
+  .item { display: flex; gap: 12px; align-items: center; padding: 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:last-child { border-bottom: 0; }
+  .item .th { width: 72px; height: 54px; border-radius: 12px; background: var(--card2) center/cover; flex: none; display: flex; align-items: center; justify-content: center; font-size: 22px; position: relative; }
+  .item .th .dur { position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,.7); font-size: 10px; padding: 1px 5px; border-radius: 6px; }
+  .item .t { font-weight: 700; font-size: 14px; }
+  .item .s { color: var(--dim); font-size: 12px; margin-top: 3px; }
+  .item .end { margin-left: auto; flex: none; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; text-align: right; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg); display: inline-block; }
+  .dot.ring { background: var(--red); }
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 0 2px 4px; scrollbar-width: none; }
+  .chip { flex: none; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); background: none; }
+  .chip.on { background: var(--fg); color: #000; border-color: var(--fg); }
+  nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.92); backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: flex; justify-content: center; padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
+  nav .in { display: flex; max-width: 560px; width: 100%; }
+  nav a { flex: 1; text-align: center; padding: 12px 0 14px; color: var(--dim); text-decoration: none; font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; }
+  nav a.on { color: var(--fg); }
+  nav a .ic { display: block; font-size: 19px; margin-bottom: 3px; }
+  .page { display: none; } .page.on { display: block; }
+  .set { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .set:last-child { border-bottom: 0; }
+  .set .l { font-size: 14px; }
+  .set .d { font-size: 11px; color: var(--dim); margin-top: 3px; line-height: 1.4; }
+  .sw { position: relative; width: 50px; height: 30px; flex: none; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sw span { position: absolute; inset: 0; background: #333; border-radius: 999px; transition: .2s; }
+  .sw span::before { content: ""; position: absolute; width: 24px; height: 24px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+  .sw input:checked + span { background: var(--red); }
+  .sw input:checked + span::before { transform: translateX(20px); }
+  select, input[type=text], input[type=password], input[type=number], input[type=time] { font: inherit; background: var(--card2); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 14px; max-width: 55%; }
+  input[type=range] { width: 100%; accent-color: var(--red); }
+  input.big { width: 100%; max-width: none; font-size: 26px; text-align: center; letter-spacing: 8px; padding: 14px; margin: 12px 0; font-family: var(--dot); font-weight: 900; }
+  .banner { background: var(--red); border-radius: 18px; padding: 14px 16px; margin-bottom: 14px; font-size: 13px; }
+  .banner b { display: block; font-size: 14px; margin-bottom: 4px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  .modal.on { display: flex; }
+  .modal .box { background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 16px; max-width: 520px; width: 100%; max-height: 92vh; overflow: auto; }
+  .modal img, .modal video { width: 100%; border-radius: 14px; display: block; background: #000; }
+  .muted { color: var(--dim); font-size: 12px; line-height: 1.5; }
+  .toast { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); background: var(--fg); color: #000; padding: 10px 16px; border-radius: 999px; font-size: 13px; font-weight: 700; opacity: 0; transition: .25s; pointer-events: none; z-index: 20; max-width: 90vw; text-align: center; }
+  .toast.on { opacity: 1; }
+  .devsel { margin-bottom: 12px; width: 100%; max-width: none; }
+  #login { position: fixed; inset: 0; background: #000; z-index: 30; display: none; align-items: center; justify-content: center; padding: 24px; }
+  #login.on { display: flex; }
+  .bar { height: 10px; background: var(--card2); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
+  .bar i { display: block; height: 100%; background: var(--fg); border-radius: 99px; }
+  .bar i.full { background: var(--red); }
+  .seg { display: flex; background: var(--card2); border-radius: 999px; padding: 4px; gap: 4px; }
+  .seg button { padding: 10px 6px; font-size: 11px; background: none; color: var(--dim); }
+  .seg button.on { background: var(--fg); color: #000; }
+  .talk.on { background: var(--red); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(215,25,33,.25); } }
+  .tag { display: inline-block; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; border: 1px solid var(--line); border-radius: 99px; padding: 2px 8px; margin-left: 6px; color: var(--dim); }
+  .tlview { position: relative; background: #050505; aspect-ratio: 4 / 3; display: flex; align-items: center; justify-content: center; }
+  .tlview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tltime { font-family: var(--dot); font-weight: 900; font-size: 30px; }
+  .ctlrow { display: flex; gap: 8px; align-items: center; }
+  .ctlrow .ib { background: var(--card2); width: 46px; height: 46px; }
+  details.adv summary { padding: 14px 16px; cursor: pointer; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; list-style: none; }
+  details.adv[open] summary { border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<div id="login"><div style="width:100%;max-width:340px;text-align:center">
+  <h1>Deurbel</h1>
+  <p class="muted">Vul je pincode in</p>
+  <input id="pin" class="big" type="password" inputmode="numeric" autocomplete="current-password">
+  <button class="primary" style="width:100%" onclick="doLogin()">Openen</button>
+  <p id="loginErr" class="muted" style="color:var(--red)"></p>
+</div></div>
+
+<div class="wrap">
+  <header>
+    <h1>Deurbel</h1>
+    <div class="status"><span id="led" class="led"></span><span id="statusTxt">Verbinden</span></div>
+  </header>
+  <div id="banners"></div>
+
+  <!-- ================= DEUR ================= -->
+  <section class="page on" id="p-deur">
+    <select id="devsel" class="devsel" style="display:none" onchange="selectDevice(this.value)"></select>
+    <div class="card">
+      <div class="view" id="view">
+        <img id="viewImg" alt="" style="display:none" onload="fitView(this.naturalWidth,this.naturalHeight)">
+        <video id="liveVideo" playsinline style="display:none"></video>
+        <div class="empty" id="viewEmpty">Nog geen beeld</div>
+        <div class="badge" id="viewBadge" style="display:none"><span class="led"></span><span id="viewBadgeTxt"></span></div>
+        <div class="ovl tr" id="snapCtl"><button class="ib" id="snapBtn" onclick="snapNow()" title="Nieuwe foto">↻</button></div>
+        <div class="ovl tr" id="liveCtl" style="display:none">
+          <button class="ib" id="muteBtn" onclick="toggleMute()" title="Geluid">🔊</button>
+          <button class="ib" onclick="openFull()" title="Volledig scherm">⤢</button>
+        </div>
+      </div>
+      <div class="pad" style="display:grid;gap:10px">
+        <button class="primary" id="liveBtn" onclick="toggleLive()">Live bekijken</button>
+        <div class="row">
+          <button class="talk" id="talkBtn" onclick="toggleTalk()">🎙 Praten</button>
+          <button onclick="openQuick()">💬 Snel antwoord</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Batterij</div><div class="v" id="sBat">--</div></div>
+      <div class="stat"><div class="k">Wifi</div><div class="v" id="sWifi">--</div></div>
+      <div class="stat"><div class="k">Vandaag</div><div class="v" id="sToday">0</div></div>
+    </div>
+
+    <div id="modeCard"></div>
+
+    <div class="sect">Laatste gebeurtenissen <a href="#log" class="muted" style="text-decoration:none">Alles ›</a></div>
+    <div class="card" id="recent"></div>
+  </section>
+
+  <!-- ================= OPNAMES ================= -->
+  <section class="page" id="p-rec">
+    <div class="seg" id="recMode" style="margin-bottom:14px"><button class="on" data-v="rec">Opnames</button><button data-v="tl">Timelapse</button></div>
+    <div id="tlSection" style="display:none">
+      <div class="chips" id="tlDays"></div>
+      <div class="card" style="margin-top:10px">
+        <div class="tlview"><img id="tlImg" alt=""><div class="empty muted" id="tlEmpty" style="position:absolute">Nog geen foto's</div>
+          <div class="badge" id="tlBadge" style="display:none"><span class="led"></span><span>Gebeurtenis</span></div></div>
+        <div class="pad" style="display:grid;gap:12px">
+          <div class="row" style="justify-content:space-between;align-items:baseline"><div class="tltime" id="tlTime">--:--</div><div class="muted" id="tlPos"></div></div>
+          <input type="range" id="tlSlider" min="0" max="0" value="0" oninput="tlShow(Number(this.value))">
+          <div class="ctlrow">
+            <button class="ib" onclick="tlStep(-1)">⏮</button>
+            <button class="primary" id="tlPlay" onclick="tlToggle()">▶ Afspelen</button>
+            <button class="ib" onclick="tlStep(1)">⏭</button>
+            <select id="tlSpeed" style="flex:none" onchange="if(tlTimer){tlToggle();tlToggle();}"><option value="2">2×/s</option><option value="5">5×/s</option><option value="10" selected>10×/s</option><option value="20">20×/s</option></select>
+          </div>
+          <div class="row"><button onclick="tlVideo()">🎬 Als video</button><button onclick="tlDownload()">⬇ Download</button><button onclick="tlDelete()">Wis dag</button></div>
+          <div class="muted" id="tlInfo"></div>
+        </div>
+      </div>
+    </div>
+    <div id="recSection">
+    <div class="card pad" id="storageCard"><div class="muted">Laden…</div></div>
+    <div class="chips" id="recChips">
+      <button class="chip on" data-k="">Alles</button>
+      <button class="chip" data-k="saved">Opgeslagen</button>
+      <button class="chip" data-k="ring">Aanbellen</button>
+      <button class="chip" data-k="person">Persoon</button>
+      <button class="chip" data-k="motion">Beweging</button>
+    </div>
+    <div class="sect"><span id="recTitle">Opnames</span><button class="small" onclick="syncRec()">↻ Vernieuwen</button></div>
+    <div class="card" id="recList"></div>
+    <button id="recMore" onclick="loadRec(true)" style="width:100%;display:none">Meer laden</button>
+    </div>
+  </section>
+
+  <!-- ================= LOG ================= -->
+  <section class="page" id="p-log">
+    <div class="chips" id="chips">
+      <button class="chip on" data-k="">Alles</button>
+      <button class="chip" data-k="ring">Aanbellen</button>
+      <button class="chip" data-k="person">Persoon</button>
+      <button class="chip" data-k="motion">Beweging</button>
+      <button class="chip" data-k="package">Pakket</button>
+    </div>
+    <div class="sect" id="logTitle">Alle gebeurtenissen</div>
+    <div class="card" id="log"></div>
+    <button id="moreBtn" onclick="loadMore()" style="width:100%;display:none">Meer laden</button>
+  </section>
+
+  <!-- ================= INSTELLINGEN ================= -->
+  <section class="page" id="p-set">
+    <div class="sect">Opslag op je server</div>
+    <div class="card">
+      <div class="set" style="display:block">
+        <div class="l">Maximale opslag</div>
+        <div class="d">Is het vol, dan worden de oudste opnames automatisch verwijderd.</div>
+        <div class="row" style="align-items:center;margin-top:12px">
+          <input type="range" id="gbRange" min="1" max="500" step="1" oninput="$('#gbNum').value=this.value">
+          <input type="number" id="gbNum" min="0.5" step="0.5" style="width:90px;flex:none" oninput="$('#gbRange').value=this.value">
+          <span class="muted">GB</span>
+        </div>
+        <div id="gbInfo" class="d" style="margin-top:8px"></div>
+        <button class="primary" style="width:100%;margin-top:12px" onclick="saveStorage()">Opslaan</button>
+      </div>
+      <div class="set"><div><div class="l">Automatisch downloaden</div><div class="d">Opnames van de deurbel naar je server halen</div></div></div>
+      <div class="set" style="padding-top:0"><div class="seg" id="autoSeg" style="width:100%">
+        <button data-v="important">Belangrijk</button><button data-v="all">Alles</button><button data-v="off">Uit</button>
+      </div></div>
+      <div class="set"><div><div class="l">Bewaren</div><div class="d">Opnames ouder dan dit verwijderen (0 = alleen GB-limiet)</div></div>
+        <span style="display:flex;align-items:center;gap:6px;flex:none"><input type="number" id="keepDays" min="0" style="width:72px;max-width:none" onchange="saveApp({keepDays:Number(this.value)})"> <span class="muted">dagen</span></span></div>
+    </div>
+
+    <div class="sect">Foto van de voordeur</div>
+    <div class="card" id="snapCard"></div>
+
+    <div class="sect">Opnemen bij gebeurtenis</div>
+    <div class="card" id="recCard"></div>
+
+    <div class="sect">Meldingen op je telefoon</div>
+    <div class="card" id="notifCard"></div>
+
+    <div class="sect">Live bekijken</div>
+    <div class="card">
+      <div class="set"><div><div class="l">Automatisch stoppen na</div><div class="d">Spaart de batterij van de deurbel</div></div>
+        <select id="liveMax" onchange="saveApp({liveMaxSeconds:Number(this.value)})">
+          <option value="60">1 min</option><option value="180">3 min</option><option value="300">5 min</option><option value="600">10 min</option><option value="1200">20 min</option>
+        </select></div>
+    </div>
+
+    <div class="sect">Deurbel</div>
+    <div class="card" id="settings"><div class="set"><div class="l muted">Laden…</div></div></div>
+
+    <div class="sect" id="stTitle" style="display:none">Basisstation</div>
+    <div class="card" id="stSettings" style="display:none"></div>
+
+    <div class="sect">Updates</div>
+    <div class="card" id="updCard"><div class="set"><div class="l muted">Laden…</div></div></div>
+
+    <div class="sect">Apparaat</div>
+    <div class="card" id="info"></div>
+    <div class="row" style="margin-top:4px"><button onclick="refreshDevice()">Vernieuwen</button><button onclick="rebootStation()">Herstarten</button></div>
+  </section>
+</div>
+
+<nav><div class="in">
+  <a href="#deur" class="on" data-p="deur"><span class="ic">◉</span>Deur</a>
+  <a href="#rec" data-p="rec"><span class="ic">▶</span>Opnames</a>
+  <a href="#log" data-p="log"><span class="ic">≡</span>Log</a>
+  <a href="#set" data-p="set"><span class="ic">⚙</span>Instellingen</a>
+</div></nav>
+
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()"><div class="box" id="modalBox"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const LABEL = { ring: "Aangebeld", person: "Persoon", motion: "Beweging", package: "Pakket" };
+const ICON = { ring: "🔔", person: "👤", motion: "〰", package: "📦" };
+let S = { devices: [], settings: {} };
+let cur = localStorage.getItem("dev") || "";
+let isLive = false, muted = false;
+let logKind = "", logItems = [], recent = [];
+let recFilter = "", recItems = [], storage = null;
+
+// ---------- vertalingen van Eufy-instellingen ----------
+const NL = {
+  enabled: ["Camera aan", ""], autoNightvision: ["Automatisch nachtzicht", ""], nightvision: ["Nachtzicht", ""],
+  statusLed: ["Statuslampje", "Lampje op de deurbel"], motionDetection: ["Bewegingsdetectie", "Deurbel let op beweging"],
+  motionDetectionType: ["Wat detecteren", ""], motionDetectionSensitivity: ["Gevoeligheid", "Hoger = eerder een melding"],
+  motionDetectionSensitivityMode: ["Gevoeligheidsmodus", ""], motionDetectionSensitivityStandard: ["Gevoeligheid (standaard)", ""],
+  watermark: ["Watermerk", "Logo/tijd in het beeld"], speakerVolume: ["Volume luidspreker", ""], ringtoneVolume: ["Volume deurbel", ""],
+  audioRecording: ["Geluid opnemen", ""], microphone: ["Microfoon", ""], powerWorkingMode: ["Batterijmodus", "Balans tussen opnemen en batterij"],
+  recordingClipLength: ["Lengte opname", "Seconden"], recordingRetriggerInterval: ["Pauze tussen opnames", "Seconden"],
+  recordingEndClipMotionStops: ["Stoppen als beweging stopt", ""], videoStreamingQuality: ["Kwaliteit live beeld", ""],
+  videoRecordingQuality: ["Kwaliteit opnames", ""], videoWdr: ["WDR", "Beter beeld bij tegenlicht"], videoHdr: ["HDR", "Beter beeld bij tegenlicht"],
+  videoDistortionCorrection: ["Vervorming corrigeren", ""], videoRingRecord: ["Opnemen tijdens live kijken", ""],
+  chimeIndoor: ["Binnenbel", "Gong binnen laten klinken"], chimeHomebase: ["Bel via HomeBase", ""],
+  chimeHomebaseRingtoneVolume: ["Volume HomeBase-bel", ""], chimeHomebaseRingtoneType: ["Belgeluid HomeBase", ""],
+  notificationType: ["Soort Eufy-melding", "Meldingen in de Eufy-app"], notificationRing: ["Eufy-melding bij aanbellen", ""],
+  notificationMotion: ["Eufy-melding bij beweging", ""], notificationPerson: ["Eufy-melding bij persoon", ""],
+  notificationRadarDetector: ["Eufy-melding bij radar", ""],
+  loiteringDetection: ["Rondhangen detecteren", "Melding als iemand blijft staan"], loiteringDetectionLength: ["Rondhangen na", ""],
+  loiteringDetectionRange: ["Afstand rondhangen", ""], loiteringCustomResponsePhoneNotification: ["Rondhangen: melding", ""],
+  loiteringCustomResponseAutoVoiceResponse: ["Rondhangen: automatisch bericht", ""], loiteringCustomResponseAutoVoiceResponseVoice: ["Rondhangen: welk bericht", ""],
+  loiteringCustomResponseHomeBaseNotification: ["Rondhangen: HomeBase-alarm", ""], loiteringCustomResponseTimeFrom: ["Rondhangen: vanaf", ""], loiteringCustomResponseTimeTo: ["Rondhangen: tot", ""],
+  deliveryGuard: ["Pakketbewaking", ""], deliveryGuardPackageGuarding: ["Pakket bewaken", ""],
+  deliveryGuardPackageGuardingActivatedTimeFrom: ["Pakket bewaken vanaf", ""], deliveryGuardPackageGuardingActivatedTimeTo: ["Pakket bewaken tot", ""],
+  deliveryGuardPackageGuardingVoiceResponseVoice: ["Pakket: welk bericht", ""], deliveryGuardPackageLiveCheckAssistance: ["Pakket live checken", ""],
+  deliveryGuardUncollectedPackageAlert: ["Melding pakket niet opgehaald", ""], deliveryGuardUncollectedPackageAlertTimeToCheck: ["Pakket controleren om", ""],
+  dualCamWatchViewMode: ["Weergave tweede camera", ""], ringAutoResponse: ["Automatisch antwoorden", "Bericht afspelen als er wordt aangebeld"],
+  ringAutoResponseVoiceResponse: ["Automatisch: spraakbericht", ""], ringAutoResponseVoiceResponseVoice: ["Automatisch: welk bericht", ""],
+  ringAutoResponseTimeFrom: ["Automatisch antwoorden vanaf", ""], ringAutoResponseTimeTo: ["Automatisch antwoorden tot", ""],
+  guardMode: ["Beveiligingsmodus", ""], alarmVolume: ["Volume alarm", ""], promptVolume: ["Volume meldingsgeluid", ""],
+  timeFormat: ["Tijdnotatie", ""], alarmTone: ["Alarmgeluid", ""], notificationSwitchModeSchedule: ["Melding bij moduswissel (schema)", ""],
+  notificationSwitchModeApp: ["Melding bij moduswissel (app)", ""], notificationStartAlarmDelay: ["Melding bij alarmvertraging", ""],
+};
+const NL_STATE = {
+  "Off": "Uit", "On": "Aan", "All day": "Hele dag", "At night": "'s Nachts", "Auto": "Automatisch", "Low": "Laag", "Medium": "Middel", "High": "Hoog",
+  "Humans only": "Alleen mensen", "All motions": "Alle beweging", "Balance Surveillance": "Gebalanceerd", "Optimal Surveillance": "Maximale bewaking",
+  "Custom Recording": "Aangepast", "Optimal Battery Life": "Maximale batterijduur", "Standard": "Standaard", "Advanced": "Geavanceerd",
+  "Away": "Afwezig", "Home": "Thuis", "Schedule": "Schema", "Disarmed": "Uitgeschakeld", "Geofencing": "Geofencing", "Custom 1": "Aangepast 1", "Custom 2": "Aangepast 2", "Custom 3": "Aangepast 3",
+  "Most Efficient": "Zuinigst", "Include Thumbnail": "Met foto", "Full Effect": "Volledig", "Disabled": "Uit", "Default": "Standaard", "Silent": "Stil",
+  "B&W Night Vision": "Zwart-wit", "Color Night Vision": "Kleur", "Storage Saver (1600 * 1200)": "Ruimtebesparend", "Split-view": "Naast elkaar",
+};
+const tr = (s) => NL_STATE[s] || String(s).replace(/ \/ Low Encoding/, " / lage compressie").replace(/ \/ High Encoding/, " / hoge compressie").replace(/within (\d+)ft/, (m, n) => "binnen " + Math.round(n * 0.3048 * 10) / 10 + " m");
+
+// ---------- helpers ----------
+function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), 2800); }
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: opts.raw ? {} : { "Content-Type": "application/json" }, body: opts.raw || (opts.body ? JSON.stringify(opts.body) : undefined) });
+  if (r.status === 401) { showLogin(); throw new Error("login"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Mislukt");
+  return j;
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function when(t) {
+  const d = new Date(t), now = new Date();
+  const hm = d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) return "Vandaag " + hm;
+  if (d.toDateString() === y.toDateString()) return "Gisteren " + hm;
+  return d.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" }) + " " + hm;
+}
+function ago(t) {
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 60) return "net"; if (s < 3600) return Math.round(s / 60) + " min geleden"; if (s < 86400) return Math.round(s / 3600) + " uur geleden";
+  return when(t);
+}
+const gb = (b) => b == null ? "?" : b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e8 ? (b / 1e6).toFixed(0) + " MB" : (b / 1e6).toFixed(1) + " MB";
+const dur = (s) => s ? (s >= 60 ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") : "0:" + String(s).padStart(2, "0")) : "";
+const dev = () => S.devices.find((d) => d.serial === cur) || S.devices[0];
+
+// ---------- login ----------
+function showLogin() { $("#login").classList.add("on"); setTimeout(() => $("#pin").focus(), 50); }
+async function doLogin() {
+  const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: $("#pin").value }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("#loginErr").textContent = j.error || "Mislukt"; return; }
+  $("#login").classList.remove("on"); start();
+}
+$("#pin").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+
+// ---------- navigatie ----------
+const PAGES = ["deur", "rec", "log", "set"];
+function go(p) {
+  document.querySelectorAll(".page").forEach((el) => el.classList.toggle("on", el.id === "p-" + p));
+  document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("on", a.dataset.p === p));
+  if (p === "log" && !logItems.length) loadLog();
+  if (p === "rec") loadRec();
+  if (p === "set") loadAppSettings();
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
+function route() {
+  const h = location.hash.slice(1) || "deur";
+  if (h === "live") { go("deur"); history.replaceState(null, "", "#deur"); if (!isLive) setTimeout(startLive, 300); return; }
+  go(PAGES.includes(h) ? h : "deur");
+}
+
+// ---------- status ----------
+function renderStatus() {
+  const led = $("#led"), t = $("#statusTxt");
+  led.className = "led";
+  if (!S.eufyConnected) { led.classList.add("bad"); t.textContent = "Server offline"; }
+  else if (!S.cloudConnected && S.auth) { led.classList.add("bad"); t.textContent = "Inloggen nodig"; }
+  else if (!S.cloudConnected) t.textContent = "Inloggen…";
+  else { led.classList.add("on"); t.textContent = "Verbonden"; }
+  let b = "";
+  if (S.auth?.kind === "code") b += `<div class="banner"><b>Verificatiecode nodig</b>Eufy heeft een code naar je e-mail gestuurd.<input id="code" class="big" type="text" inputmode="numeric" style="background:#000"><button class="primary" style="width:100%" onclick="sendCode()">Bevestigen</button></div>`;
+  if (S.auth?.kind === "captcha") b += `<div class="banner"><b>Captcha nodig</b><img src="${esc(S.auth.captcha)}" style="width:100%;background:#fff;border-radius:12px;margin:8px 0"><input id="captcha" class="big" type="text" style="background:#000;letter-spacing:4px"><button class="primary" style="width:100%" onclick="sendCaptcha()">Bevestigen</button></div>`;
+  if (S.lastError && !S.auth) b += `<div class="banner"><b>Probleem</b>${esc(S.lastError)}</div>`;
+  if (S.eufyConnected && S.cloudConnected && !S.devices.length) b += `<div class="banner" style="background:var(--card2)"><b>Geen deurbel gevonden</b>Heb je de deurbel gedeeld met het account van de server?</div>`;
+  const el = $("#banners"); if (el._h !== b) { el.innerHTML = b; el._h = b; }
+}
+async function sendCode() { try { await api("/api/auth/code", { method: "POST", body: { code: $("#code").value } }); toast("Code verstuurd"); } catch (e) { toast(e.message); } }
+async function sendCaptcha() { try { await api("/api/auth/captcha", { method: "POST", body: { captcha: $("#captcha").value } }); toast("Captcha verstuurd"); } catch (e) { toast(e.message); } }
+
+function renderDevice() {
+  const sel = $("#devsel");
+  if (S.devices.length > 1) { sel.style.display = ""; sel.innerHTML = S.devices.map((d) => `<option value="${d.serial}" ${d.serial === cur ? "selected" : ""}>${esc(d.name)}</option>`).join(""); }
+  else sel.style.display = "none";
+  const d = dev(); if (!d) return;
+  if (!cur) cur = d.serial;
+  $("#sBat").textContent = d.battery != null ? d.battery + "%" : "--";
+  $("#sBat").style.color = d.batteryLow || (d.battery != null && d.battery < 20) ? "var(--red)" : "";
+  const lvl = d.wifiSignalLevel;
+  $("#sWifi").textContent = lvl != null ? "▮".repeat(Math.max(0, Math.min(4, lvl))) + "▯".repeat(Math.max(0, 4 - lvl)) : (d.wifiRssi ?? "--");
+  if (!isLive) showPicture(d);
+  $("#liveBtn").textContent = isLive ? "Stoppen" : "Live bekijken";
+  $("#liveBtn").className = isLive ? "red" : "primary";
+  $("#talkBtn").classList.toggle("on", !!talking);
+  $("#talkBtn").textContent = talking ? "■ Stop praten" : "🎙 Praten";
+  renderMode(d); renderSettings(d); renderInfo(d);
+}
+async function snapNow() {
+  const d = dev(); if (!d) return;
+  const b = $("#snapBtn"); b.disabled = true; b.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;margin:0"></span>';
+  toast("Deurbel wakker maken voor een foto…");
+  try { await api(`/api/device/${d.serial}/snapshot`, { method: "POST" }); toast("Foto bijgewerkt"); }
+  catch (e) { toast(e.message); }
+  b.disabled = false; b.textContent = "↻";
+}
+function fitView(w, h) { if (w && h) $("#view").style.aspectRatio = w + " / " + h; }
+function showPicture(d) {
+  const img = $("#viewImg"), empty = $("#viewEmpty"), badge = $("#viewBadge");
+  $("#liveVideo").style.display = "none"; $("#liveCtl").style.display = "none"; $("#snapCtl").style.display = "";
+  if (d.hasPicture) {
+    const src = `/api/device/${d.serial}/picture.jpg?t=${d.pictureAt || 0}`;
+    if (img.dataset.src !== src) { img.src = src; img.dataset.src = src; }
+    img.style.display = ""; empty.style.display = "none";
+    badge.style.display = ""; badge.className = "badge"; $("#viewBadgeTxt").textContent = d.pictureAt ? ago(d.pictureAt) : "Laatste beeld";
+  } else { img.style.display = "none"; empty.style.display = ""; badge.style.display = "none"; empty.innerHTML = "Nog geen beeld<br><br>Tik op Live bekijken"; }
+}
+function selectDevice(sn) { if (isLive) stopLive(); cur = sn; localStorage.setItem("dev", sn); settingsKey = ""; renderDevice(); }
+
+// beveiligingsmodus + snooze
+function renderMode(d) {
+  const st = d.station;
+  let h = "";
+  if (st && st.guardStates) {
+    const modes = Object.entries(st.guardStates).filter(([k]) => ["0", "1", "2", "63"].includes(k) || Number(k) === st.guardMode);
+    h += `<div class="sect">Beveiligingsmodus</div><div class="card pad"><div class="seg">${modes.map(([k, v]) => `<button class="${Number(k) === st.guardMode ? "on" : ""}" onclick="setGuard(${k})">${esc(tr(v))}</button>`).join("")}</div></div>`;
+  }
+  h += `<div class="card"><div class="set"><div><div class="l">Niet storen</div><div class="d">${d.snooze ? "Staat aan" : "Bel en meldingen tijdelijk stil"}</div></div><button class="small" onclick="openSnooze()">${d.snooze ? "Aanpassen" : "Instellen"}</button></div></div>`;
+  const el = $("#modeCard"); if (el._h !== h) { el.innerHTML = h; el._h = h; }
+}
+async function setGuard(v) {
+  const st = dev()?.station; if (!st) return;
+  try { await api(`/api/station/${st.serial}/property`, { method: "POST", body: { name: "guardMode", value: v } }); toast("Modus gewijzigd"); } catch (e) { toast(e.message); }
+}
+function openSnooze() {
+  modal(`<div class="t" style="font-weight:700;margin-bottom:6px">Niet storen</div><div class="muted">Wat moet er stil?</div>
+    <div class="set" style="padding:12px 0"><div class="l">Binnenbel / gong</div><label class="sw"><input type="checkbox" id="snChime" checked><span></span></label></div>
+    <div class="set" style="padding:12px 0"><div class="l">Bewegingsmeldingen</div><label class="sw"><input type="checkbox" id="snMotion" checked><span></span></label></div>
+    <div class="set" style="padding:12px 0;border:0"><div class="l">HomeBase</div><label class="sw"><input type="checkbox" id="snHb"><span></span></label></div>
+    <div class="grid2" style="margin-top:8px">${[[1800, "30 min"], [3600, "1 uur"], [7200, "2 uur"], [14400, "4 uur"], [28800, "8 uur"], [0, "Uitzetten"]].map(([s, l]) => `<button ${s === 0 ? 'class="red"' : ""} onclick="snooze(${s})">${l}</button>`).join("")}</div>`);
+}
+async function snooze(sec) {
+  const d = dev(); if (!d) return;
+  try { await api(`/api/device/${d.serial}/snooze`, { method: "POST", body: { seconds: sec, chime: $("#snChime").checked, motion: $("#snMotion").checked, homebase: $("#snHb").checked } }); toast(sec ? "Niet storen aan" : "Niet storen uit"); closeModal(); } catch (e) { toast(e.message); }
+}
+
+// ---------- live met geluid ----------
+let chase, liveAbort = null;
+function toggleLive() { isLive ? stopLive() : startLive(); }
+function startLive() {
+  const d = dev(); if (!d) return toast("Geen deurbel");
+  isLive = true;
+  const v = $("#liveVideo"), empty = $("#viewEmpty"), badge = $("#viewBadge");
+  $("#viewImg").style.display = "none"; $("#snapCtl").style.display = "none";
+  empty.style.display = ""; empty.innerHTML = '<div class="spinner"></div>Deurbel wakker maken…';
+  badge.style.display = ""; badge.className = "badge live"; $("#viewBadgeTxt").textContent = "Verbinden";
+  v.style.display = "none";
+  v.muted = muted;
+  v.onloadedmetadata = () => fitView(v.videoWidth, v.videoHeight);
+  v.onplaying = () => { empty.style.display = "none"; v.style.display = ""; $("#liveCtl").style.display = ""; $("#viewBadgeTxt").textContent = "Live"; };
+  const url = `/api/device/${d.serial}/live.mp4?t=${Date.now()}`;
+  if (window.MediaSource) playMse(url, v).catch((e) => { if (isLive) { stopLive(true); toast("Live beeld gestopt" + (e && e.message && e.name !== "AbortError" ? ": " + e.message : "")); } });
+  else { v.src = url; v.onerror = v.onended = () => { if (isLive) { stopLive(true); toast("Live beeld gestopt"); } }; tryPlay(v); }
+  clearInterval(chase);
+  chase = setInterval(() => { // bij het live-punt blijven
+    if (v.buffered.length) { const end = v.buffered.end(v.buffered.length - 1); if (end - v.currentTime > 1.2) v.currentTime = Math.max(v.buffered.start(v.buffered.length - 1), end - 0.25); }
+  }, 700);
+  updateMute(); renderDevice();
+}
+function tryPlay(v) { v.play().catch(() => { v.muted = true; muted = true; updateMute(); v.play().catch(() => {}); }); }
+
+// Media Source Extensions: stukjes MP4 direct in de videospeler stoppen = lage vertraging
+async function playMse(url, v) {
+  liveAbort = new AbortController();
+  const ms = new MediaSource();
+  v.src = URL.createObjectURL(ms);
+  await new Promise((r) => ms.addEventListener("sourceopen", r, { once: true }));
+  const res = await fetch(url, { signal: liveAbort.signal });
+  if (!res.ok || !res.body) throw new Error("server gaf " + res.status);
+  const reader = res.body.getReader();
+  let head = new Uint8Array(0), sb = null, queue = [], started = false;
+  const pump = () => {
+    if (!sb || sb.updating || !queue.length) return;
+    try {
+      // buffer klein houden
+      if (v.buffered.length && v.currentTime - v.buffered.start(0) > 20 && !queue._trimming) { queue._trimming = true; sb.remove(0, v.currentTime - 10); return; }
+      queue._trimming = false;
+      sb.appendBuffer(queue.shift());
+    } catch (e) { console.log("append", e); }
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!isLive) { liveAbort.abort(); break; }
+    if (!sb) {
+      const n = new Uint8Array(head.length + value.length); n.set(head); n.set(value, head.length); head = n;
+      const init = findInit(head);
+      if (!init) continue;
+      const mime = `video/mp4; codecs="${init.codecs}"`;
+      if (!MediaSource.isTypeSupported(mime)) throw new Error("telefoon kan dit beeldformaat niet afspelen");
+      sb = ms.addSourceBuffer(mime);
+      sb.mode = "segments";
+      sb.addEventListener("updateend", pump);
+      queue.push(head); head = null;
+    } else queue.push(value);
+    pump();
+    if (!started && v.buffered.length) { started = true; tryPlay(v); }
+  }
+  if (isLive) throw new Error("stream beëindigd");
+}
+function findInit(buf) {
+  // zoek ftyp + moov en lees de codecs uit (avcC / mp4a)
+  let off = 0, moovEnd = -1;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  while (off + 8 <= buf.length) {
+    const size = dv.getUint32(off), type = String.fromCharCode(buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]);
+    if (size < 8) return null;
+    if (type === "moov") { if (off + size > buf.length) return null; moovEnd = off + size; break; }
+    off += size;
+  }
+  if (moovEnd < 0) return null;
+  const find = (name) => { for (let i = 0; i < moovEnd - 4; i++) if (buf[i] === name.charCodeAt(0) && buf[i + 1] === name.charCodeAt(1) && buf[i + 2] === name.charCodeAt(2) && buf[i + 3] === name.charCodeAt(3)) return i; return -1; };
+  const a = find("avcC");
+  const hex = (n) => n.toString(16).padStart(2, "0");
+  const codecs = [a > 0 ? `avc1.${hex(buf[a + 5])}${hex(buf[a + 6])}${hex(buf[a + 7])}` : "avc1.4d401f"];
+  if (find("mp4a") > 0) codecs.push("mp4a.40.2");
+  return { codecs: codecs.join(", ") };
+}
+function stopLive(silent) {
+  const d = dev();
+  isLive = false; clearInterval(chase);
+  try { liveAbort?.abort(); } catch {}
+  liveAbort = null;
+  const v = $("#liveVideo");
+  v.onerror = v.onended = v.onplaying = null;
+  v.pause(); v.removeAttribute("src"); v.load();
+  if (talking) stopTalk();
+  if (d && !silent) api(`/api/device/${d.serial}/live/stop`, { method: "POST" }).catch(() => {});
+  renderDevice();
+}
+function toggleMute() { muted = !muted; $("#liveVideo").muted = muted; updateMute(); }
+function updateMute() { $("#muteBtn").textContent = muted ? "🔇" : "🔊"; }
+function openFull() { const v = $("#view"); (v.requestFullscreen || v.webkitRequestFullscreen)?.call(v); }
+document.addEventListener("visibilitychange", () => { if (document.hidden && isLive) stopLive(); });
+
+// ---------- terugpraten ----------
+let talking = false, rec = null, micStream = null, sendChain = Promise.resolve();
+async function toggleTalk() { talking ? stopTalk() : startTalk(); }
+async function startTalk() {
+  const d = dev(); if (!d) return;
+  if (!window.isSecureContext) {
+    modal(`<div style="font-weight:700;margin-bottom:8px">Terugpraten heeft HTTPS nodig</div><div class="muted">Je browser geeft de microfoon alleen vrij via een beveiligde verbinding. Open het dashboard via Tailscale (https://…ts.net), zie de handleiding. Live kijken en luisteren werkt wel gewoon.</div><button class="primary" style="width:100%;margin-top:14px" onclick="closeModal()">Oké</button>`);
+    return;
+  }
+  try { micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+  catch { return toast("Geen toegang tot de microfoon"); }
+  if (!isLive) startLive();
+  talking = true;
+  const v = $("#liveVideo"); v.dataset.vol = v.volume; v.volume = 0.25; // minder rondzingen
+  const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
+  rec = new MediaRecorder(micStream, mime ? { mimeType: mime } : {});
+  rec.ondataavailable = (e) => {
+    if (!e.data.size) return;
+    sendChain = sendChain.then(() => api(`/api/device/${d.serial}/talk`, { method: "POST", raw: e.data })).catch((err) => { if (talking) { toast("Praten mislukt: " + err.message); stopTalk(); } });
+  };
+  rec.start(250);
+  renderDevice();
+}
+function stopTalk() {
+  const d = dev();
+  talking = false;
+  try { rec?.stop(); } catch {}
+  micStream?.getTracks().forEach((t) => t.stop());
+  rec = null; micStream = null;
+  const v = $("#liveVideo"); if (v.dataset.vol) v.volume = Number(v.dataset.vol);
+  sendChain = sendChain.then(() => d && api(`/api/device/${d.serial}/talk/stop`, { method: "POST" })).catch(() => {});
+  renderDevice();
+}
+
+// ---------- snelle antwoorden ----------
+function openQuick() {
+  const d = dev(); if (!d) return;
+  const v = d.voices || [];
+  modal(`<div style="font-weight:700;margin-bottom:10px">Snel antwoord</div>
+    ${v.length ? `<div style="display:grid;gap:8px">${v.map((x) => `<button onclick="quick(${x.id})" style="text-transform:none;text-align:left">${esc(x.name)}</button>`).join("")}</div>`
+      : '<div class="muted">Geen berichten gevonden. Snelle antwoorden worden ingesteld in de deurbel zelf; tik op Vernieuwen bij Instellingen om ze opnieuw op te halen.</div>'}
+    <button class="primary" style="width:100%;margin-top:12px" onclick="closeModal()">Sluiten</button>`);
+}
+async function quick(id) { try { await api(`/api/device/${dev().serial}/quick-response`, { method: "POST", body: { voiceId: id } }); toast("Bericht wordt afgespeeld"); closeModal(); } catch (e) { toast(e.message); } }
+
+// ---------- gebeurtenissen ----------
+function evRow(e) {
+  const th = e.snapshot ? `style="background-image:url('/api/snapshot/${e.snapshot}')"` : "";
+  return `<div class="item" onclick="openEvent('${e.id}')"><div class="th" ${th}>${e.snapshot ? "" : ICON[e.kind] || "•"}</div>
+    <div><div class="t">${LABEL[e.kind] || e.kind}${e.detail ? " · " + esc(e.detail) : ""}</div><div class="s">${when(e.time)}${S.devices.length > 1 ? " · " + esc(e.device) : ""}</div></div>
+    <div class="end"><span class="dot ${e.kind}"></span></div></div>`;
+}
+function renderRecent() {
+  const today = new Date().toDateString();
+  $("#sToday").textContent = recent.filter((e) => new Date(e.time).toDateString() === today && e.kind === "ring").length;
+  $("#recent").innerHTML = recent.length ? recent.slice(0, 5).map(evRow).join("") : '<div class="pad muted">Nog niks gebeurd. Zodra iemand aanbelt zie je het hier.</div>';
+}
+function renderLog() { $("#log").innerHTML = logItems.length ? logItems.map(evRow).join("") : '<div class="pad muted">Geen gebeurtenissen</div>'; }
+async function loadRecent() { recent = (await api("/api/events")).events; renderRecent(); }
+async function loadLog() { const j = await api("/api/events" + (logKind ? "?kind=" + logKind : "")); logItems = j.events; renderLog(); $("#moreBtn").style.display = j.events.length >= 50 ? "" : "none"; }
+async function loadMore() {
+  const last = logItems[logItems.length - 1]; if (!last) return;
+  const j = await api(`/api/events?before=${last.time}${logKind ? "&kind=" + logKind : ""}`);
+  logItems = logItems.concat(j.events); renderLog(); $("#moreBtn").style.display = j.events.length >= 50 ? "" : "none";
+}
+$("#chips").addEventListener("click", (e) => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  $("#chips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === b));
+  logKind = b.dataset.k; $("#logTitle").textContent = logKind ? LABEL[logKind] : "Alle gebeurtenissen"; loadLog();
+});
+function openEvent(id) {
+  const e = [...recent, ...logItems].find((x) => x.id === id); if (!e) return;
+  const r = recItems.find((x) => Math.abs(x.start - e.time) < 30000);
+  modal(`${e.snapshot ? `<img src="/api/snapshot/${e.snapshot}">` : '<div class="muted" style="padding:30px 0;text-align:center">Geen foto bij deze gebeurtenis</div>'}
+    <div style="margin:14px 0 4px;font-weight:700">${LABEL[e.kind] || e.kind}${e.detail ? " · " + esc(e.detail) : ""}</div>
+    <div class="muted">${when(e.time)} · ${esc(e.device)}</div>
+    <div class="row" style="margin-top:16px;flex-wrap:wrap">
+      <button onclick="findRecording(${e.time})">▶ Opname</button>
+      ${e.snapshot ? `<button onclick="saveFile('/api/snapshot/${e.snapshot}','deurbel-${e.snapshot}')">Opslaan</button>` : ""}
+      <button onclick="delEvent('${e.id}')">Wissen</button>
+    </div>`);
+}
+async function findRecording(t) {
+  const j = await api(`/api/recordings?before=${t + 120000}`);
+  const r = j.recordings.find((x) => x.start <= t + 20000 && (x.end || x.start + 60000) >= t - 20000) || j.recordings.find((x) => Math.abs(x.start - t) < 90000);
+  if (!r) return toast("Nog geen opname gevonden (komt soms pas na een minuut)");
+  recItems = [r, ...recItems.filter((x) => x.id !== r.id)];
+  openRec(r.id);
+}
+async function delEvent(id) {
+  await api("/api/events/" + id, { method: "DELETE" });
+  recent = recent.filter((e) => e.id !== id); logItems = logItems.filter((e) => e.id !== id);
+  renderRecent(); renderLog(); closeModal(); toast("Gewist");
+}
+
+// ---------- opnames ----------
+const REC_STATUS = { remote: "Op deurbel", queued: "In wachtrij", downloading: "Downloaden…", done: "" };
+function recRow(r) {
+  const thumb = r.thumb || r.snapshot ? `style="background-image:url('/api/recordings/${r.id}.jpg')"` : "";
+  const kind = r.kind ? LABEL[r.kind] : (r.person ? "Persoon" : "Opname");
+  const st = r.status === "done" ? (r.keep ? "★ " : "") + gb(r.size) : r.status === "downloading" ? `<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;margin:0;vertical-align:middle"></span>` : REC_STATUS[r.status] || "";
+  return `<div class="item" onclick="openRec('${r.id}')"><div class="th" ${thumb}>${thumb ? "" : ICON[r.kind] || "▶"}${r.duration ? `<span class="dur">${dur(r.duration)}</span>` : ""}</div>
+    <div><div class="t">${kind}${r.status !== "done" ? "" : ' <span class="dot" style="background:var(--ok);margin-left:4px"></span>'}</div><div class="s">${when(r.start)}${S.devices.length > 1 ? " · " + esc(r.device) : ""}</div></div>
+    <div class="end" id="rs-${r.id}">${st}</div></div>`;
+}
+function renderRec() {
+  $("#recList").innerHTML = recItems.length ? recItems.map(recRow).join("") : '<div class="pad muted">Nog geen opnames. Ze verschijnen hier zodra de deurbel iets heeft opgenomen.</div>';
+}
+function renderStorage() {
+  if (!storage) return;
+  const pct = Math.min(100, (storage.used / storage.limit) * 100);
+  $("#storageCard").innerHTML = `<div class="row" style="justify-content:space-between;align-items:baseline"><div style="font-family:var(--dot);font-weight:900;font-size:26px">${gb(storage.used)}</div><div class="muted">van ${gb(storage.limit)}</div></div>
+    <div class="bar"><i class="${pct > 90 ? "full" : ""}" style="width:${pct}%"></i></div>
+    <div class="muted">${storage.count} opname${storage.count === 1 ? "" : "s"} opgeslagen${storage.timelapse ? " · timelapse " + gb(storage.timelapse) : ""}${storage.diskFree != null ? " · " + gb(storage.diskFree) + " vrij op de schijf" : ""}${S.queue ? " · " + S.queue + " in wachtrij" : ""}</div>`;
+  $("#gbInfo").textContent = `Nu in gebruik: ${gb(storage.used)}${storage.diskFree != null ? " · vrij op schijf: " + gb(storage.diskFree) : ""}`;
+}
+async function loadRec(more) {
+  const last = more ? recItems[recItems.length - 1] : null;
+  const j = await api(`/api/recordings?filter=${recFilter}${last ? "&before=" + last.start : ""}`);
+  recItems = more ? recItems.concat(j.recordings) : j.recordings;
+  storage = j.storage; renderRec(); renderStorage();
+  $("#recMore").style.display = j.recordings.length >= 40 ? "" : "none";
+}
+async function syncRec() { toast("Opnames ophalen…"); try { await api("/api/recordings/sync", { method: "POST" }); await loadRec(); toast("Bijgewerkt"); } catch (e) { toast(e.message); } }
+$("#recChips").addEventListener("click", (e) => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  $("#recChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === b));
+  recFilter = b.dataset.k; $("#recTitle").textContent = b.textContent; loadRec();
+});
+function openRec(id) {
+  const r = recItems.find((x) => x.id === id); if (!r) return;
+  const kind = r.kind ? LABEL[r.kind] : (r.person ? "Persoon" : "Opname");
+  let media;
+  if (r.status === "done") media = `<video src="/api/recordings/${r.id}.mp4" controls autoplay playsinline poster="/api/recordings/${r.id}.jpg"></video>`;
+  else media = `<div style="aspect-ratio:4/3;background:#000 center/cover;border-radius:14px;display:flex;align-items:center;justify-content:center;${r.snapshot || r.thumb ? `background-image:url('/api/recordings/${r.id}.jpg')` : ""}"><div style="background:rgba(0,0,0,.7);padding:12px 16px;border-radius:14px;text-align:center" class="muted">${r.status === "downloading" ? '<div class="spinner"></div>Opname wordt gedownload…' : r.status === "queued" ? "In de wachtrij" : "Deze opname staat nog op de deurbel"}${r.error ? "<br>Laatste poging: " + esc(r.error) : ""}</div></div>`;
+  modal(`${media}<div style="margin:14px 0 4px;font-weight:700">${kind}${r.keep ? '<span class="tag">★ Bewaard</span>' : ""}</div>
+    <div class="muted">${when(r.start)}${r.duration ? " · " + dur(r.duration) : ""}${r.size ? " · " + gb(r.size) : ""} · ${esc(r.device)}</div>
+    <div class="row" style="margin-top:16px;flex-wrap:wrap">
+      ${r.status === "done" ? `<button onclick="saveFile('/api/recordings/${r.id}.mp4','deurbel-${r.id}.mp4')">⬇ Opslaan</button>
+        <button onclick="keepRec('${r.id}')">${r.keep ? "☆ Niet bewaren" : "★ Bewaren"}</button>
+        <button onclick="delRec('${r.id}')">Wissen</button>` : r.status === "remote" ? `<button class="primary" onclick="dlRec('${r.id}')">⬇ Naar server halen</button>` : ""}
+    </div>${r.status === "done" ? '<div class="muted" style="margin-top:10px">★ Bewaren = wordt nooit automatisch verwijderd als de opslag vol raakt.</div>' : ""}`);
+  $("#modal").dataset.rec = id;
+}
+async function dlRec(id) { try { await api(`/api/recordings/${id}/download`, { method: "POST" }); toast("Wordt gedownload, de deurbel moet even wakker worden"); } catch (e) { toast(e.message); } }
+async function keepRec(id) { const j = await api(`/api/recordings/${id}/keep`, { method: "POST" }); toast(j.keep ? "Wordt bewaard" : "Niet meer bewaard"); }
+async function delRec(id) { if (!confirm("Opname van je server wissen?")) return; await api(`/api/recordings/${id}`, { method: "DELETE" }); closeModal(); toast("Gewist"); loadRec(); }
+function updateRec(r) {
+  const i = recItems.findIndex((x) => x.id === r.id);
+  if (i >= 0) { recItems[i] = r; renderRec(); }
+  if ($("#modal").classList.contains("on") && $("#modal").dataset.rec === r.id && !$("#modalBox video")) openRec(r.id);
+}
+
+// ---------- timelapse ----------
+let tlDay = null, tlList = [], tlIdx = 0, tlTimer = null;
+$("#recMode").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  $("#recMode").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+  const tl = b.dataset.v === "tl";
+  $("#tlSection").style.display = tl ? "" : "none"; $("#recSection").style.display = tl ? "none" : "";
+  if (tl) loadTlDays(); else if (tlTimer) tlToggle();
+});
+const dayName = (d) => {
+  const t = new Date(d + "T12:00:00"), now = new Date(), y = new Date(); y.setDate(now.getDate() - 1);
+  if (t.toDateString() === now.toDateString()) return "Vandaag";
+  if (t.toDateString() === y.toDateString()) return "Gisteren";
+  return t.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" });
+};
+async function loadTlDays() {
+  const d = dev(); if (!d) return;
+  const j = await api(`/api/timelapse/${d.serial}`);
+  $("#tlDays").innerHTML = j.days.map((x) => `<button class="chip ${x.day === tlDay ? "on" : ""}" data-d="${x.day}">${dayName(x.day)} · ${x.count}</button>`).join("");
+  const iv = S.settings?.snapshotMinutes;
+  $("#tlInfo").textContent = (iv ? `Elke ${iv >= 60 ? iv / 60 + " uur" : iv + " min"} een foto, plus bij elke gebeurtenis.` : "Automatische foto's staan uit (Instellingen → Foto van de voordeur).") + (S.settings?.timelapseDays ? ` Bewaard: ${S.settings.timelapseDays} dagen.` : "");
+  if (!j.days.length) { $("#tlEmpty").style.display = ""; $("#tlImg").style.display = "none"; $("#tlTime").textContent = "--:--"; $("#tlPos").textContent = ""; return; }
+  if (!tlDay || !j.days.some((x) => x.day === tlDay)) tlDay = j.days[0].day;
+  $("#tlDays").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.d === tlDay));
+  loadTlDay(tlDay, true);
+}
+$("#tlDays").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (!b) return; tlDay = b.dataset.d; $("#tlDays").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === b)); loadTlDay(tlDay, true); });
+async function loadTlDay(day, toEnd) {
+  const d = dev(); if (!d) return;
+  if (tlTimer) tlToggle();
+  tlList = (await api(`/api/timelapse/${d.serial}/${day}`)).frames;
+  $("#tlSlider").max = Math.max(0, tlList.length - 1);
+  $("#tlEmpty").style.display = tlList.length ? "none" : ""; $("#tlImg").style.display = tlList.length ? "" : "none";
+  tlShow(toEnd ? tlList.length - 1 : 0);
+}
+function tlSrc(i) { return `/api/timelapse/${dev().serial}/${tlDay}/${tlList[i].f}`; }
+function tlShow(i) {
+  if (!tlList.length) return;
+  tlIdx = Math.max(0, Math.min(tlList.length - 1, i));
+  const fr = tlList[tlIdx];
+  $("#tlImg").src = tlSrc(tlIdx);
+  if (tlIdx + 1 < tlList.length) new Image().src = tlSrc(tlIdx + 1); // vooruit laden
+  $("#tlSlider").value = tlIdx;
+  $("#tlTime").textContent = fr.t.slice(0, 5);
+  $("#tlPos").textContent = `${tlIdx + 1} / ${tlList.length}`;
+  $("#tlBadge").style.display = fr.event ? "" : "none";
+}
+function tlStep(n) { if (tlTimer) tlToggle(); tlShow(tlIdx + n); }
+function tlToggle() {
+  if (tlTimer) { clearInterval(tlTimer); tlTimer = null; $("#tlPlay").textContent = "▶ Afspelen"; return; }
+  if (tlIdx >= tlList.length - 1) tlShow(0);
+  $("#tlPlay").textContent = "❚❚ Pauze";
+  tlTimer = setInterval(() => { if (tlIdx >= tlList.length - 1) return tlToggle(); tlShow(tlIdx + 1); }, 1000 / Number($("#tlSpeed").value));
+}
+function tlVideo() {
+  if (tlList.length < 2) return toast("Te weinig foto's voor een video");
+  const fps = $("#tlSpeed").value;
+  modal(`<div class="muted" id="tlvWait" style="text-align:center;padding:20px"><div class="spinner"></div>Video maken van ${tlList.length} foto's…</div>
+    <video id="tlv" controls autoplay playsinline style="display:none"></video>
+    <div style="margin-top:12px;font-weight:700">Timelapse ${dayName(tlDay)}</div>
+    <div class="row" style="margin-top:12px"><button onclick="tlDownload()">⬇ Download</button><button class="primary" onclick="closeModal()">Sluiten</button></div>`);
+  const v = $("#tlv");
+  v.oncanplay = () => { $("#tlvWait").style.display = "none"; v.style.display = ""; };
+  v.onerror = () => { $("#tlvWait").textContent = "Video maken mislukt"; };
+  v.src = `/api/timelapse/${dev().serial}/${tlDay}/video.mp4?fps=${fps}&t=${Date.now()}`;
+}
+function tlDownload() { toast("Video wordt gemaakt…"); saveFile(`/api/timelapse/${dev().serial}/${tlDay}/video.mp4?fps=${$("#tlSpeed").value}&download=1`, `timelapse-${tlDay}.mp4`); }
+async function tlDelete() {
+  if (!tlDay || !confirm(`Alle timelapse-foto's van ${dayName(tlDay)} wissen?`)) return;
+  await api(`/api/timelapse/${dev().serial}/${tlDay}`, { method: "DELETE" });
+  tlDay = null; toast("Gewist"); loadTlDays();
+}
+
+// ---------- updates ----------
+let updPoll = null, updFrom = null;
+async function loadUpdate() {
+  const u = await api("/api/update").catch(() => null);
+  const el = $("#updCard"); if (!u) return;
+  if (!u.installed) { el.innerHTML = '<div class="set"><div class="d">Automatische updates zijn nog niet ingesteld. Installeer via GitHub (zie README) om ze aan te zetten.</div></div>'; return; }
+  const when = (t) => t ? new Date(t).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "?";
+  const color = { ok: "var(--ok)", available: "var(--fg)", updating: "var(--fg)", error: "var(--red)" }[u.state] || "var(--dim)";
+  el.innerHTML = `<div class="set"><div><div class="l">Versie ${esc(u.current)}</div><div class="d">${esc(u.currentTitle || "")}${u.currentDate ? " · " + when(u.currentDate) : ""}</div></div></div>
+    <div class="set"><div><div class="l" style="color:${color}">${u.state === "updating" ? '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin:0 6px 0 0;vertical-align:middle"></span>' : ""}${esc(u.message)}</div>
+      <div class="d">${u.state === "available" ? "Nieuw: " + esc(u.latestTitle) + "<br>" : ""}Laatst gecontroleerd: ${when(u.checkedAt)} · ${u.auto ? `automatisch elke ${u.hours} uur` : "automatisch bijwerken staat uit"}</div></div></div>
+    <div class="set row"><button onclick="updAction('check')">Controleren</button>${u.state === "available" || u.state === "error" ? `<button class="primary" onclick="updAction('install')">Nu bijwerken</button>` : ""}</div>`;
+  if (u.state === "updating" && !updPoll) startUpdPoll();
+  if (updFrom && u.current && u.current !== updFrom && u.state === "ok") { toast("Bijgewerkt! Pagina wordt herladen…"); setTimeout(() => location.reload(), 1500); }
+}
+function startUpdPoll() { clearInterval(updPoll); updPoll = setInterval(() => loadUpdate().catch(() => {}), 3000); setTimeout(() => { clearInterval(updPoll); updPoll = null; }, 300000); }
+async function updAction(a) {
+  const u = await api("/api/update").catch(() => ({}));
+  updFrom = u.current;
+  await api("/api/update", { method: "POST", body: { action: a } });
+  toast(a === "install" ? "Bijwerken gestart, dit duurt een paar minuten" : "Controleren…");
+  startUpdPoll();
+}
+
+// ---------- app-instellingen ----------
+async function loadAppSettings() {
+  const j = await api("/api/settings");
+  S.settings = j.settings; storage = j.storage;
+  renderAppSettings(); renderStorage();
+  loadUpdate();
+}
+function renderAppSettings() {
+  const s = S.settings || {};
+  if (document.activeElement !== $("#gbNum")) { $("#gbNum").value = s.storageGb; $("#gbRange").value = Math.min(500, s.storageGb); }
+  $("#autoSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === s.autoDownload));
+  if (document.activeElement !== $("#keepDays")) $("#keepDays").value = s.keepDays ?? 0;
+  $("#liveMax").value = String(s.liveMaxSeconds);
+  if (![...$("#liveMax").options].some((o) => o.value === String(s.liveMaxSeconds))) $("#liveMax").insertAdjacentHTML("beforeend", `<option value="${s.liveMaxSeconds}" selected>${Math.round(s.liveMaxSeconds / 60)} min</option>`);
+  $("#snapCard").innerHTML = `<div class="set"><div><div class="l">Foto bijwerken</div><div class="d">Maakt de deurbel even wakker. Vaker = meer batterijverbruik. Slaat over als de batterij onder 15% is.</div></div>
+      <select onchange="saveApp({snapshotMinutes:Number(this.value)})">${[[0, "Nooit"], [5, "Elke 5 min"], [15, "Elke 15 min"], [30, "Elke 30 min"], [60, "Elk uur"], [120, "Elke 2 uur"], [240, "Elke 4 uur"], [480, "Elke 8 uur"]].map(([v, l]) => `<option value="${v}" ${v === s.snapshotMinutes ? "selected" : ""}>${l}</option>`).join("")}${[0, 5, 15, 30, 60, 120, 240, 480].includes(s.snapshotMinutes) ? "" : `<option selected>${s.snapshotMinutes} min</option>`}</select></div>`
+    + `<div class="set"><div><div class="l">Foto bij gebeurtenis</div><div class="d">Nieuwe foto bij aanbellen, persoon en pakket</div></div><label class="sw"><input type="checkbox" ${s.snapshotOnEvent !== false ? "checked" : ""} onchange="saveApp({snapshotOnEvent:this.checked})"><span></span></label></div>`
+    + `<div class="set"><div><div class="l">Foto's van Eufy gebruiken</div><div class="d">Uit laten als de foto's strepen of grijze vlakken hebben</div></div><label class="sw"><input type="checkbox" ${s.useEufyPicture ? "checked" : ""} onchange="saveApp({useEufyPicture:this.checked})"><span></span></label></div>`
+    + `<div class="set"><div><div class="l">Timelapse bewaren</div><div class="d">Alle foto's per dag bewaren om terug te kijken (Opnames → Timelapse)</div></div><label class="sw"><input type="checkbox" ${s.timelapse !== false ? "checked" : ""} onchange="saveApp({timelapse:this.checked})"><span></span></label></div>`
+    + `<div class="set"><div><div class="l">Timelapse bewaren voor</div><div class="d">Telt mee voor de opslaglimiet</div></div><select onchange="saveApp({timelapseDays:Number(this.value)})">${[[7, "1 week"], [14, "2 weken"], [30, "1 maand"], [90, "3 maanden"], [365, "1 jaar"], [0, "Altijd"]].map(([v, l]) => `<option value="${v}" ${v === s.timelapseDays ? "selected" : ""}>${l}</option>`).join("")}</select></div>`
+    + `<div class="set"><button onclick="snapNow()">📷 Nu een foto maken</button></div>`;
+  const rsw = (k, l) => `<div class="set"><div class="l">${l}</div><label class="sw"><input type="checkbox" ${s.recordOn?.[k] ? "checked" : ""} onchange="saveApp({recordOn:{${k}:this.checked}})"><span></span></label></div>`;
+  $("#recCard").innerHTML = `<div class="set"><div class="d">De server neemt zelf op via het live beeld zodra er iets gebeurt. Opnames komen in Opnames en tellen mee voor de opslaglimiet.</div></div>`
+    + rsw("ring", "Bij aanbellen") + rsw("person", "Bij een persoon") + rsw("package", "Bij een pakket") + rsw("motion", "Bij beweging")
+    + `<div class="set"><div><div class="l">Lengte opname</div><div class="d">Verlengt vanzelf als er meer gebeurt</div></div><select onchange="saveApp({recordSeconds:Number(this.value)})">${[[15, "15 sec"], [30, "30 sec"], [45, "45 sec"], [60, "1 min"], [90, "1,5 min"], [120, "2 min"]].map(([v, l]) => `<option value="${v}" ${v === s.recordSeconds ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
+  const sw = (k, l, d) => `<div class="set"><div><div class="l">${l}</div>${d ? `<div class="d">${d}</div>` : ""}</div><label class="sw"><input type="checkbox" ${s[k] ? "checked" : ""} onchange="saveApp({${k}:this.checked})"><span></span></label></div>`;
+  $("#notifCard").innerHTML = (S.notificationsEnabled ? "" : '<div class="set"><div class="d" style="color:var(--red)">Meldingen staan uit: vul NTFY_TOPIC in je .env in (zie handleiding).</div></div>')
+    + sw("notifyRing", "Aanbellen", "Altijd met hoogste prioriteit") + sw("notifyPerson", "Persoon gezien") + sw("notifyMotion", "Beweging", "Kan vaak afgaan") + sw("notifyPackage", "Pakket")
+    + sw("ntfySnapshot", "Foto meesturen")
+    + `<div class="set"><div><div class="l">Wachttijd tussen meldingen</div><div class="d">Voor beweging/persoon, aanbellen meldt altijd</div></div><select onchange="saveApp({motionCooldown:Number(this.value)})">${[[0, "Geen"], [60, "1 min"], [120, "2 min"], [300, "5 min"], [900, "15 min"]].map(([v, l]) => `<option value="${v}" ${v === s.motionCooldown ? "selected" : ""}>${l}</option>`).join("")}</select></div>`
+    + `<div class="set"><button onclick="testNotify()">Testmelding sturen</button></div>`;
+}
+$("#autoSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) saveApp({ autoDownload: b.dataset.v }); });
+async function saveApp(patch) {
+  try { const j = await api("/api/settings", { method: "POST", body: patch }); S.settings = j.settings; storage = j.storage; renderAppSettings(); renderStorage(); toast("Opgeslagen"); }
+  catch (e) { toast(e.message); }
+}
+function saveStorage() {
+  const v = Number($("#gbNum").value);
+  if (!(v >= 0.5)) return toast("Minimaal 0,5 GB");
+  if (storage && v * 1e9 < storage.used && !confirm(`Je gebruikt nu ${gb(storage.used)}. De oudste opnames worden verwijderd tot het onder ${v} GB zit. Doorgaan?`)) return;
+  saveApp({ storageGb: v });
+}
+
+// ---------- deurbel-instellingen ----------
+let settingsKey = "";
+function settingCtl(s, scope, d) {
+  const id = `${scope}:${s.name}`;
+  const call = (val) => `setProp('${scope}','${s.name}',${val})`;
+  if (s.type === "boolean") return `<label class="sw"><input type="checkbox" ${s.value ? "checked" : ""} onchange="${call("this.checked")}"><span></span></label>`;
+  if (/Voice$/.test(s.name) && d.voices?.length) return `<select onchange="${call("Number(this.value)")}">${d.voices.map((v) => `<option value="${v.id}" ${v.id === s.value ? "selected" : ""}>${esc(v.name)}</option>`).join("")}</select>`;
+  if (s.states) return `<select onchange="${call("Number(this.value)")}">${Object.entries(s.states).map(([k, v]) => `<option value="${k}" ${Number(k) === s.value ? "selected" : ""}>${esc(tr(v))}</option>`).join("")}</select>`;
+  if (s.type === "number" && s.min != null && s.max != null && s.max - s.min <= 200) return `<span style="display:flex;align-items:center;gap:8px;width:45%"><input type="range" min="${s.min}" max="${s.max}" value="${s.value ?? s.min}" oninput="this.nextElementSibling.textContent=this.value" onchange="${call("Number(this.value)")}"><b style="min-width:28px;text-align:right">${s.value ?? ""}</b></span>`;
+  if (s.type === "number") return `<input type="number" style="width:90px" value="${s.value ?? ""}" onchange="${call("Number(this.value)")}">`;
+  if (s.type === "string" && /Time/.test(s.name)) return `<input type="time" value="${esc(s.value)}" onchange="${call("this.value")}">`;
+  return `<input type="text" value="${esc(s.value)}" onchange="${call("this.value")}">`;
+}
+const MAIN = ["motionDetection", "motionDetectionType", "motionDetectionSensitivity", "statusLed", "chimeIndoor", "ringtoneVolume", "speakerVolume", "microphone", "audioRecording", "nightvision", "autoNightvision", "videoStreamingQuality", "videoRecordingQuality", "powerWorkingMode", "recordingClipLength", "watermark"];
+function renderSettings(d) {
+  const key = JSON.stringify([d.serial, d.settings, d.voices, d.station?.settings, d.enabled]);
+  if (key === settingsKey) return; settingsKey = key;
+  const row = (s, scope) => { const [l, desc] = NL[s.name] || [s.label, ""]; return `<div class="set"><div><div class="l">${esc(l)}</div>${desc ? `<div class="d">${esc(desc)}</div>` : ""}</div>${settingCtl(s, scope, d)}</div>`; };
+  const main = d.settings.filter((s) => MAIN.includes(s.name)).sort((a, b) => MAIN.indexOf(a.name) - MAIN.indexOf(b.name));
+  const rest = d.settings.filter((s) => !MAIN.includes(s.name));
+  const enabledRow = d.enabled != null ? `<div class="set"><div><div class="l">Camera aan</div><div class="d">Uit = deurbel neemt niets op</div></div><label class="sw"><input type="checkbox" ${d.enabled ? "checked" : ""} onchange="setProp('dev','enabled',this.checked)"><span></span></label></div>` : "";
+  $("#settings").innerHTML = (enabledRow + main.map((s) => row(s, "dev")).join("") || '<div class="set"><div class="l muted">Geen instellingen beschikbaar</div></div>')
+    + (rest.length ? `<details class="adv"><summary>Meer instellingen (${rest.length}) ›</summary>${rest.map((s) => row(s, "dev")).join("")}</details>` : "");
+  const st = d.station;
+  const show = st && st.settings.length && st.serial !== d.serial;
+  $("#stTitle").style.display = $("#stSettings").style.display = show ? "" : "none";
+  if (show) $("#stSettings").innerHTML = st.settings.map((s) => row(s, "st")).join("");
+  else if (st && st.settings.length) $("#settings").insertAdjacentHTML("beforeend", st.settings.map((s) => row(s, "st")).join(""));
+}
+async function setProp(scope, name, value) {
+  const d = dev(); if (!d) return;
+  const url = scope === "st" ? `/api/station/${d.station.serial}/property` : `/api/device/${d.serial}/property`;
+  try { await api(url, { method: "POST", body: { name, value } }); toast("Opgeslagen"); }
+  catch (e) { toast("Mislukt: " + e.message); settingsKey = ""; renderSettings(d); }
+}
+function renderInfo(d) {
+  const rows = [["Naam", d.name], ["Model", d.model], ["Serienummer", d.serial], ["Firmware", d.softwareVersion], ["Hardware", d.hardwareVersion],
+    ["Batterijtemperatuur", d.batteryTemperature != null ? d.batteryTemperature + " °C" : null], ["Opladen", d.charging != null ? (d.charging ? "Ja" : "Nee") : null],
+    ["Wifi-signaal", d.wifiRssi != null ? d.wifiRssi + " dBm" : null], ["Basisstation", d.station && d.station.serial !== d.serial ? `${d.station.name || ""} (${d.station.serial})` : null]].filter((r) => r[1] != null && r[1] !== "");
+  $("#info").innerHTML = rows.map(([k, v]) => `<div class="set"><div class="l muted">${k}</div><div style="text-align:right">${esc(v)}</div></div>`).join("");
+}
+async function testNotify() { try { await api("/api/test-notification", { method: "POST" }); toast("Testmelding verstuurd"); } catch (e) { toast(e.message); } }
+async function refreshDevice() { const d = dev(); if (!d) return; try { await api(`/api/device/${d.serial}/refresh`, { method: "POST" }); toast("Vernieuwd"); } catch (e) { toast(e.message); } }
+async function rebootStation() {
+  const d = dev(); if (!d?.station) return toast("Niet beschikbaar");
+  if (!confirm("Deurbel/basisstation herstarten?")) return;
+  try { await api(`/api/station/${d.station.serial}/reboot`, { method: "POST" }); toast("Herstart verstuurd"); } catch (e) { toast(e.message); }
+}
+
+// ---------- modal ----------
+function modal(html) { $("#modalBox").innerHTML = html; $("#modal").classList.add("on"); $("#modal").dataset.rec = ""; }
+function closeModal() { $("#modal").classList.remove("on"); $("#modalBox").querySelectorAll("video").forEach((v) => v.pause()); $("#modalBox").innerHTML = ""; }
+function saveFile(url, name) { const a = document.createElement("a"); a.href = url; a.download = name; a.click(); }
+
+// ---------- live updates ----------
+let es;
+function connectStream() {
+  es?.close();
+  es = new EventSource("/api/stream");
+  es.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    switch (msg.type) {
+      case "state":
+        S = msg; if (!S.devices.find((d) => d.serial === cur)) cur = S.devices[0]?.serial || "";
+        renderStatus(); renderDevice(); if ($("#p-set").classList.contains("on")) renderAppSettings(); break;
+      case "device": {
+        const i = S.devices.findIndex((d) => d.serial === msg.device.serial);
+        if (i >= 0) S.devices[i] = msg.device; else S.devices.push(msg.device);
+        renderDevice(); break;
+      }
+      case "event":
+        recent.unshift(msg.event); renderRecent();
+        if (!logKind || logKind === msg.event.kind) { logItems.unshift(msg.event); renderLog(); }
+        if (msg.event.kind === "ring") { toast("Er wordt aangebeld!"); navigator.vibrate?.([200, 100, 200]); }
+        break;
+      case "event-update":
+        for (const list of [recent, logItems]) { const i = list.findIndex((e) => e.id === msg.event.id); if (i >= 0) list[i] = msg.event; }
+        renderRecent(); renderLog(); break;
+      case "recording": updateRec(msg.recording); break;
+      case "recordings-changed": if ($("#p-rec").classList.contains("on")) loadRec(); break;
+      case "download-progress": { const el = document.getElementById("rs-" + msg.id); if (el) el.innerHTML = gb(msg.bytes); break; }
+      case "live-ended": if (msg.serial === cur && isLive) { stopLive(true); toast("Live gestopt: " + msg.reason); } break;
+    }
+  };
+  es.onerror = () => { $("#led").className = "led bad"; $("#statusTxt").textContent = "Geen verbinding"; };
+}
+setInterval(() => { if (!isLive && dev()) showPicture(dev()); }, 30000);
+
+async function start() {
+  try { S = await api("/api/state"); } catch { return; }
+  renderStatus(); renderDevice();
+  loadRecent().catch(() => {});
+  connectStream();
+  route();
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+start();
+</script>
+</body>
+</html>
