@@ -693,7 +693,7 @@ async function quick(id) { try { await api(`/api/device/${dev().serial}/quick-re
 function evRow(e) {
   const th = e.snapshot ? `style="background-image:url('/api/snapshot/${e.snapshot}')"` : "";
   return `<div class="item" onclick="openEvent('${e.id}')"><div class="th" ${th}>${e.snapshot ? "" : ICON[e.kind] || "•"}</div>
-    <div><div class="t">${LABEL[e.kind] || e.kind}${e.detail ? " · " + esc(e.detail) : ""}</div><div class="s">${when(e.time)}${S.devices.length > 1 ? " · " + esc(e.device) : ""}</div></div>
+    <div><div class="t">${LABEL[e.kind] || e.kind}${e.detail ? " · " + esc(e.detail) : ""}</div><div class="s">${when(e.time)}${S.devices.length > 1 ? " · " + esc(devName(e.serial, e.device)) : ""}</div></div>
     <div class="end"><span class="dot ${e.kind}"></span></div></div>`;
 }
 function renderRecent() {
@@ -719,7 +719,7 @@ function openEvent(id) {
   const r = recItems.find((x) => Math.abs(x.start - e.time) < 30000);
   modal(`${e.snapshot ? `<img src="/api/snapshot/${e.snapshot}">` : '<div class="muted" style="padding:30px 0;text-align:center">Geen foto bij deze gebeurtenis</div>'}
     <div style="margin:14px 0 4px;font-weight:700">${LABEL[e.kind] || e.kind}${e.detail ? " · " + esc(e.detail) : ""}</div>
-    <div class="muted">${when(e.time)} · ${esc(e.device)}</div>
+    <div class="muted">${when(e.time)} · ${esc(devName(e.serial, e.device))}</div>
     <div class="row" style="margin-top:16px;flex-wrap:wrap">
       <button onclick="findRecording(${e.time})">▶ Opname</button>
       ${e.snapshot ? `<button onclick="saveFile('/api/snapshot/${e.snapshot}','deurbel-${e.snapshot}')">Opslaan</button>` : ""}
@@ -740,13 +740,14 @@ async function delEvent(id) {
 }
 
 // ---------- opnames ----------
-const REC_STATUS = { remote: "Op deurbel", queued: "In wachtrij", downloading: "Downloaden…", done: "" };
+const REC_STATUS = { remote: "Op deurbel", queued: "In wachtrij", downloading: "Downloaden…", done: "", recording: '<span style="color:var(--red)">● Opnemen</span>', processing: "Verwerken…" };
+const devName = (sn, fallback) => S.devices.find((d) => d.serial === sn)?.name || fallback || sn;
 function recRow(r) {
   const thumb = r.thumb || r.snapshot ? `style="background-image:url('/api/recordings/${r.id}.jpg')"` : "";
   const kind = r.kind ? LABEL[r.kind] : (r.person ? "Persoon" : "Opname");
-  const st = r.status === "done" ? (r.keep ? "★ " : "") + gb(r.size) : r.status === "downloading" ? `<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;margin:0;vertical-align:middle"></span>` : REC_STATUS[r.status] || "";
+  const st = r.status === "done" ? (r.keep ? "★ " : "") + gb(r.size) : r.status === "downloading" || r.status === "processing" ? `<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;margin:0;vertical-align:middle"></span>` : REC_STATUS[r.status] || "";
   return `<div class="item" onclick="openRec('${r.id}')"><div class="th" ${thumb}>${thumb ? "" : ICON[r.kind] || "▶"}${r.duration ? `<span class="dur">${dur(r.duration)}</span>` : ""}</div>
-    <div><div class="t">${kind}${r.status !== "done" ? "" : ' <span class="dot" style="background:var(--ok);margin-left:4px"></span>'}</div><div class="s">${when(r.start)}${S.devices.length > 1 ? " · " + esc(r.device) : ""}</div></div>
+    <div><div class="t">${kind}${r.status !== "done" ? "" : ' <span class="dot" style="background:var(--ok);margin-left:4px"></span>'}</div><div class="s">${when(r.start)}${S.devices.length > 1 ? " · " + esc(devName(r.serial, r.device)) : ""}</div></div>
     <div class="end" id="rs-${r.id}">${st}</div></div>`;
 }
 function renderRec() {
@@ -774,7 +775,7 @@ async function loadRec(more) {
   storage = j.storage; renderRec(); renderStorage();
   $("#recMore").style.display = j.recordings.length >= 40 ? "" : "none";
 }
-async function syncRec() { toast("Opnames ophalen…"); try { await api("/api/recordings/sync", { method: "POST" }); await loadRec(); toast("Bijgewerkt"); } catch (e) { toast(e.message); } }
+async function syncRec() { try { api("/api/recordings/sync", { method: "POST" }).catch(() => {}); await loadRec(); toast("Bijgewerkt"); } catch (e) { toast(e.message); } }
 $("#recChips").addEventListener("click", (e) => {
   const b = e.target.closest(".chip"); if (!b) return;
   $("#recChips").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === b));
@@ -782,12 +783,14 @@ $("#recChips").addEventListener("click", (e) => {
 });
 function openRec(id) {
   const r = recItems.find((x) => x.id === id); if (!r) return;
+  if (r.status === "recording") { cur = r.serial; location.hash = "#deur"; setTimeout(startLive, 300); return; }
+  if (r.status === "processing") return toast("Opname wordt nog verwerkt, even geduld");
   const kind = r.kind ? LABEL[r.kind] : (r.person ? "Persoon" : "Opname");
   let media;
   if (r.status === "done") media = `<video src="/api/recordings/${r.id}.mp4" controls autoplay playsinline poster="/api/recordings/${r.id}.jpg"></video>`;
   else media = `<div style="aspect-ratio:4/3;background:#000 center/cover;border-radius:14px;display:flex;align-items:center;justify-content:center;${r.snapshot || r.thumb ? `background-image:url('/api/recordings/${r.id}.jpg')` : ""}"><div style="background:rgba(0,0,0,.7);padding:12px 16px;border-radius:14px;text-align:center" class="muted">${r.status === "downloading" ? '<div class="spinner"></div>Opname wordt gedownload…' : r.status === "queued" ? "In de wachtrij" : "Deze opname staat nog op de deurbel"}${r.error ? "<br>Laatste poging: " + esc(r.error) : ""}</div></div>`;
   modal(`${media}<div style="margin:14px 0 4px;font-weight:700">${kind}${r.keep ? '<span class="tag">★ Bewaard</span>' : ""}</div>
-    <div class="muted">${when(r.start)}${r.duration ? " · " + dur(r.duration) : ""}${r.size ? " · " + gb(r.size) : ""} · ${esc(r.device)}</div>
+    <div class="muted">${when(r.start)}${r.duration ? " · " + dur(r.duration) : ""}${r.size ? " · " + gb(r.size) : ""} · ${esc(devName(r.serial, r.device))}</div>
     <div class="row" style="margin-top:16px;flex-wrap:wrap">
       ${r.status === "done" ? `<button onclick="saveFile('/api/recordings/${r.id}.mp4','deurbel-${r.id}.mp4')">⬇ Opslaan</button>
         <button onclick="keepRec('${r.id}')">${r.keep ? "☆ Niet bewaren" : "★ Bewaren"}</button>
@@ -801,6 +804,7 @@ async function delRec(id) { if (!confirm("Opname van je server wissen?")) return
 function updateRec(r) {
   const i = recItems.findIndex((x) => x.id === r.id);
   if (i >= 0) { recItems[i] = r; renderRec(); }
+  else if ($("#p-rec").classList.contains("on")) loadRec();
   if ($("#modal").classList.contains("on") && $("#modal").dataset.rec === r.id && !$("#modalBox video")) openRec(r.id);
 }
 
@@ -990,9 +994,11 @@ async function loadAppSettings() {
 function renderAppSettings() {
   const s = S.settings || {};
   const multi = S.devices.length > 1;
-  $("#camSect").style.display = $("#camCard").style.display = multi ? "" : "none";
-  if (multi) $("#camCard").innerHTML = `<div class="set"><div><div class="l">Standaard camera</div><div class="d">Deze zie je als eerste als je de app opent</div></div>
-    <select onchange="saveApp({defaultCamera:this.value})"><option value="">Laatst gekozen</option>${S.devices.map((d) => `<option value="${d.serial}" ${d.serial === s.defaultCamera ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>`;
+  $("#camSect").style.display = $("#camCard").style.display = S.devices.length ? "" : "none";
+  if (!$("#camCard").contains(document.activeElement)) $("#camCard").innerHTML = S.devices.map((d) => `<div class="set"><div style="flex:1;min-width:0"><div class="l">${d.locked ? "🔒 " : ""}Naam</div><div class="d">${esc(d.model || "")} · ${esc(d.serial)}</div></div>
+      <input type="text" value="${esc(d.name === d.serial ? "" : d.name)}" placeholder="bv. Voordeur" maxlength="40" style="max-width:52%" onchange="saveApp({names:{'${d.serial}':this.value}})"></div>`).join("")
+    + (multi ? `<div class="set"><div><div class="l">Standaard camera</div><div class="d">Deze zie je als eerste als je de app opent</div></div>
+    <select onchange="saveApp({defaultCamera:this.value})"><option value="">Laatst gekozen</option>${S.devices.map((d) => `<option value="${d.serial}" ${d.serial === s.defaultCamera ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>` : "");
   if (document.activeElement !== $("#gbNum")) { $("#gbNum").value = s.storageGb; $("#gbRange").value = Math.min(500, s.storageGb); }
   $("#autoSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === s.autoDownload));
   if (document.activeElement !== $("#keepDays")) $("#keepDays").value = s.keepDays ?? 0;

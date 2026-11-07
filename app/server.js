@@ -93,6 +93,7 @@ const state = {
   devices: {},   // serial -> { serial, props, meta, picture, pictureAt, voices }
   stations: {},  // serial -> { serial, props, meta }
 };
+const displayName = (sn) => settings.names?.[sn] || state.devices[sn]?.props?.name || sn;
 const deviceAllowed = (sn) => !ENV.deviceSerial || ENV.deviceSerial === sn;
 
 let events = readJson(path.join(ENV.dataDir, "events.json"), []);
@@ -100,6 +101,7 @@ const saveEvents = () => writeJson(path.join(ENV.dataDir, "events.json"), events
 let recordings = readJson(path.join(ENV.dataDir, "recordings.json"), []);
 const saveRecordings = () => writeJson(path.join(ENV.dataDir, "recordings.json"), recordings);
 for (const r of recordings) if (r.status === "downloading") r.status = r.file ? "done" : "remote";
+recordings = recordings.filter((r) => r.status !== "recording"); // half afgemaakte opnames van voor een herstart
 
 // ================= Server-Sent Events =================
 const sseClients = new Map(); // res -> req
@@ -157,7 +159,8 @@ function publicDevice(d) {
   const st = state.stations[p.stationSerialNumber] || null;
   return {
     serial: d.serial,
-    name: p.name || d.serial,
+    name: displayName(d.serial),
+    eufyName: p.name || null,
     model: p.model,
     type: p.type,
     battery: p.battery,
@@ -425,7 +428,7 @@ function addEvent(serial, kind, detail) {
   const now = Date.now();
   if (events.find((x) => x.serial === serial && x.kind === kind && now - x.time < 15000)) return;
   const d = state.devices[serial];
-  const ev = { id: crypto.randomUUID(), serial, device: d?.props?.name || serial, kind, time: now };
+  const ev = { id: crypto.randomUUID(), serial, device: displayName(serial), kind, time: now };
   if (detail && typeof detail === "string" && detail !== "Unknown") ev.detail = detail;
   events.unshift(ev);
   while (events.length > ENV.maxEvents) {
@@ -668,7 +671,7 @@ async function startRecording(serial, kind, eventRef) {
   const cur = recorders.get(serial);
   if (cur) { // loopt al: verlengen
     cur.until = Math.min(cur.start + 180000, now + settings.recordSeconds * 1000);
-    if (kind === "ring" || (kind === "person" && cur.kind === "motion")) cur.kind = kind;
+    if (kind === "ring" || (kind === "person" && cur.kind === "motion")) { cur.kind = kind; if (cur.placeholder) cur.placeholder.kind = kind; }
     clearTimeout(cur.timer); cur.timer = setTimeout(() => stopRecording(serial), cur.until - now);
     return;
   }
@@ -678,6 +681,10 @@ async function startRecording(serial, kind, eventRef) {
   const v = { res: out, ff: null, recorder: true };
   const r = { v, id, tmp, kind, start: now, until: now + settings.recordSeconds * 1000, snapshot: eventRef?.snapshot, event: eventRef };
   recorders.set(serial, r);
+  // meteen zichtbaar in de lijst als "bezig met opnemen"
+  r.placeholder = { id, serial, device: displayName(serial), start: now, kind, status: "recording", source: "server" };
+  recordings.unshift(r.placeholder);
+  broadcast({ type: "recordings-changed" });
   out.on("close", () => finishRecording(serial, r).catch((e) => log("Opname afronden mislukt:", e.message)));
   r.timer = setTimeout(() => stopRecording(serial), settings.recordSeconds * 1000);
   log("Opname gestart", serial, `(${kind})`);
@@ -695,25 +702,64 @@ function stopRecording(serial) {
   if (l && l.viewers.has(r.v)) l.removeViewer(r.v);
   else { try { r.v.res.end(); } catch {} }
 }
+// Zet een opname om naar een mp4 die elke telefoon afspeelt (H.264 main, gewone tijdstempels).
+// Het ruwe beeld van de deurbel (2K, wisselende tijdstempels) speelt op mobiel vaak niet af.
+const ffQueue = [];
+let ffBusy = false;
+function makeWebMp4(input, out) {
+  return new Promise((resolve) => { ffQueue.push({ input, out, resolve }); pumpFf(); });
+}
+async function pumpFf() {
+  if (ffBusy || !ffQueue.length) return;
+  ffBusy = true;
+  const { input, out, resolve } = ffQueue.shift();
+  let ok = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts", "-i", input,
+    "-map", "0:v:0", "-map", "0:a:0?", "-vf", "scale='min(1600,iw)':-2,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "25",
+    "-profile:v", "main", "-level", "4.1", "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", out + ".tmp.mp4"]);
+  if (!ok) ok = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", input, "-c", "copy", "-movflags", "+faststart", out + ".tmp.mp4"]);
+  if (ok) fs.renameSync(out + ".tmp.mp4", out); else fs.rm(out + ".tmp.mp4", () => {});
+  ffBusy = false;
+  resolve(ok);
+  pumpFf();
+}
+// Oudere opnames (van voor deze versie) één keer omzetten zodat ze ook op mobiel afspelen
+setTimeout(async () => {
+  for (const rec of recordings.filter((x) => x.file && x.source === "server" && !x.web)) {
+    const f = path.join(REC_DIR, rec.file);
+    if (!fs.existsSync(f)) continue;
+    const tmp = f + ".orig";
+    fs.renameSync(f, tmp);
+    log("Oudere opname omzetten voor mobiel:", rec.id);
+    const ok = await makeWebMp4(tmp, f);
+    if (ok) { fs.rm(tmp, () => {}); rec.web = true; rec.size = fs.statSync(f).size; rec.duration = await probeDuration(f); }
+    else fs.renameSync(tmp, f);
+    saveRecordings();
+  }
+  broadcast({ type: "recordings-changed" });
+}, 20000);
+
 async function finishRecording(serial, r) {
   if (recorders.get(serial) === r) recorders.delete(serial);
+  if (r.placeholder) { r.placeholder.status = "processing"; broadcast({ type: "recording", recording: r.placeholder }); }
   let size = 0;
   try { size = fs.statSync(r.tmp).size; } catch {}
-  if (size < 20000) { fs.rm(r.tmp, () => {}); log("Opname leeg, niet bewaard"); return; }
+  const dropPlaceholder = () => { const i = recordings.indexOf(r.placeholder); if (i >= 0) recordings.splice(i, 1); broadcast({ type: "recordings-changed" }); };
+  if (size < 20000) { fs.rm(r.tmp, () => {}); log("Opname leeg, niet bewaard"); dropPlaceholder(); return; }
   const file = r.id + ".mp4";
   const out = path.join(REC_DIR, file);
-  const ok = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", r.tmp, "-c", "copy", "-movflags", "+faststart", out]);
+  const ok = await makeWebMp4(r.tmp, out);
   fs.rm(r.tmp, () => {});
-  if (!ok) return;
+  if (!ok) { dropPlaceholder(); return; }
   await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-ss", "1", "-i", out, "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "5", path.join(REC_DIR, r.id + ".jpg")]);
   const ev = r.event && events.find((e) => e.id === r.event.id);
   const rec = {
-    id: r.id, serial, device: state.devices[serial]?.props?.name || serial, start: r.start,
-    end: Date.now(), kind: r.kind, status: "done", source: "server", file,
+    id: r.id, serial, device: displayName(serial), start: r.start,
+    end: Date.now(), kind: r.kind, status: "done", source: "server", file, web: true,
     size: fs.statSync(out).size, duration: await probeDuration(out), codec: "h264",
     thumb: fs.existsSync(path.join(REC_DIR, r.id + ".jpg")), snapshot: ev?.snapshot || r.snapshot, downloadedAt: Date.now(),
   };
-  recordings.push(rec);
+  const pi = recordings.indexOf(r.placeholder);
+  if (pi >= 0) recordings[pi] = rec; else recordings.push(rec);
   recordings.sort((a, b) => b.start - a.start);
   saveRecordings();
   log(`Opname opgeslagen: ${rec.duration}s, ${(rec.size / 1e6).toFixed(1)} MB`);
@@ -1013,7 +1059,13 @@ async function dirSize(dir) {
   for (const f of await fsp.readdir(dir)) { try { total += (await fsp.stat(path.join(dir, f))).size; } catch {} }
   return total;
 }
-async function storageInfo() {
+let storageCache = null, storageCacheAt = 0;
+async function storageInfo(fresh) {
+  if (!fresh && storageCache && Date.now() - storageCacheAt < 60000) return { ...storageCache, limit: settings.storageGb * 1e9, count: recordings.filter((r) => r.file).length };
+  storageCache = await storageInfoReal(); storageCacheAt = Date.now();
+  return storageCache;
+}
+async function storageInfoReal() {
   const rec = await dirSize(REC_DIR);
   const snap = await dirSize(SNAP_DIR);
   const tl = await dirSizeDeep(TL_DIR);
@@ -1033,7 +1085,7 @@ async function enforceStorage() {
     const cutoff = Date.now() - settings.keepDays * 86400000;
     for (const r of recordings) if (r.file && r.start < cutoff && !r.keep) { deleteLocal(r); changed = true; }
   }
-  let info = await storageInfo();
+  let info = await storageInfo(true);
   // ook: altijd minstens 1 GB vrij laten op de schijf
   const needFree = () => info.diskFree != null && info.diskFree < 1e9;
   tlPruneDays();
@@ -1154,7 +1206,7 @@ async function api(req, res, url) {
 
   // --- pincodes ---
   if (p === "/api/security") {
-    return json(res, 200, { appPin: !!sec.appPin, cameras: Object.values(state.devices).map((d) => ({ serial: d.serial, name: d.props.name || d.serial, hasPin: !!sec.camPins[d.serial], unlocked: !camLocked(req, d.serial) })) });
+    return json(res, 200, { appPin: !!sec.appPin, cameras: Object.values(state.devices).map((d) => ({ serial: d.serial, name: displayName(d.serial), hasPin: !!sec.camPins[d.serial], unlocked: !camLocked(req, d.serial) })) });
   }
   if (p === "/api/pin" && post) {
     const b = await readBody(req);
@@ -1244,7 +1296,7 @@ async function api(req, res, url) {
     const list = recordings.filter((r) => r.start < before && (!serial || r.serial === serial) && visible(r.serial) && (!filter || (filter === "saved" ? r.file : filter === "person" ? (r.person || r.kind === "person") : r.kind === filter))).slice(0, 40);
     return json(res, 200, { recordings: list, storage: await storageInfo() });
   }
-  if (p === "/api/recordings/sync" && post) { await syncRecordings(); return json(res, 200, { ok: true }); }
+  if (p === "/api/recordings/sync" && post) { syncRecordings().catch(() => {}); return json(res, 200, { ok: true }); }
   if ((m = p.match(/^\/api\/recordings\/([\w-]+)\.mp4$/))) {
     const r = recordings.find((x) => x.id === m[1]);
     if (!r || !r.file) return json(res, 404, { error: "Niet opgeslagen" });
@@ -1315,6 +1367,11 @@ async function api(req, res, url) {
     if (b.snapshotMinutes != null && isFinite(b.snapshotMinutes)) settings.snapshotMinutes = num(b.snapshotMinutes, 0, 1440);
     if (b.timelapseDays != null && isFinite(b.timelapseDays)) settings.timelapseDays = num(b.timelapseDays, 0, 3650);
     if (typeof b.defaultCamera === "string") settings.defaultCamera = b.defaultCamera;
+    if (b.names && typeof b.names === "object") {
+      settings.names = settings.names || {};
+      for (const [sn, n] of Object.entries(b.names)) { const v = String(n || "").trim().slice(0, 40); if (v) settings.names[sn] = v; else delete settings.names[sn]; }
+      for (const d of Object.values(state.devices)) broadcastDevice(d.serial);
+    }
     for (const k of ["snapshotOnEvent", "useEufyPicture", "timelapse"]) if (typeof b[k] === "boolean") settings[k] = b[k];
     if (b.recordSeconds != null && isFinite(b.recordSeconds)) settings.recordSeconds = num(b.recordSeconds, 10, 180);
     if (b.recordOn && typeof b.recordOn === "object") for (const k of ["ring", "person", "motion", "package"]) if (typeof b.recordOn[k] === "boolean") settings.recordOn[k] = b.recordOn[k];

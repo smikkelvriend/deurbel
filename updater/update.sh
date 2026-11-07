@@ -26,16 +26,24 @@ status() {
   echo "$(date '+%H:%M:%S') $1: $2"
 }
 
+# eufy-security-ws (koppeling met Eufy) hooguit één keer per dag bijwerken; dat downloaden kost tijd
+eufy_update() {
+  [ "${UPDATE_EUFY:-true}" = "true" ] || return
+  stamp="$DIR/deurbel-data/.eufy-pull"
+  if [ -f "$stamp" ] && [ $(( $(date +%s) - $(cat "$stamp") )) -lt 86400 ]; then return; fi
+  date +%s > "$stamp"
+  echo "$(date '+%H:%M:%S') eufy-security-ws bijwerken (dagelijks)"
+  docker compose pull -q eufy >/dev/null 2>&1 && docker compose up -d eufy >/dev/null 2>&1
+}
+
 check() { # $1 = 1 om ook te installeren als automatisch bijwerken uit staat
   if ! git fetch -q origin main 2>/tmp/err; then status error "GitHub niet bereikbaar: $(tail -c 150 /tmp/err)"; return; fi
-  if [ "${UPDATE_EUFY:-true}" = "true" ]; then
-    docker compose pull -q eufy >/dev/null 2>&1 && docker compose up -d eufy >/dev/null 2>&1
-  fi
-  if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then status ok "Je hebt de nieuwste versie"; return; fi
+  if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then status ok "Je hebt de nieuwste versie"; eufy_update; return; fi
   if [ "$AUTO" != "true" ] && [ "$1" != "1" ]; then status available "Update beschikbaar"; return; fi
   status updating "Bijwerken naar de nieuwste versie…"
   old=$(git rev-parse HEAD)
   git reset -q --hard origin/main
+  status updating "Nieuwe versie bouwen en herstarten…"
   if docker compose up -d --build deurbel >/tmp/out 2>&1; then
     status ok "Bijgewerkt naar de nieuwste versie"
   else
@@ -51,7 +59,7 @@ status ok "Updater gestart"
 check 0
 last=$(date +%s)
 while true; do
-  sleep 15
+  sleep 3
   if [ -f "$FLAG" ]; then
     action=$(cat "$FLAG"); rm -f "$FLAG"
     if [ "$action" = "install" ]; then check 1; else check 0; fi
