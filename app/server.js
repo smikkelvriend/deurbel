@@ -720,7 +720,7 @@ async function pumpFf() {
   ffBusy = true;
   const { input, out, resolve } = ffQueue.shift();
   let ok = await runNice("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts", "-i", input,
-    "-map", "0:v:0", "-map", "0:a:0?", "-vf", "scale='min(1600,iw)':-2,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "25",
+    "-map", "0:v:0", "-map", "0:a:0?", "-vf", "scale='min(1600,iw)':-2,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-threads", "2",
     "-profile:v", "main", "-level", "4.1", "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", out + ".tmp.mp4"]);
   if (!ok) ok = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", input, "-c", "copy", "-movflags", "+faststart", out + ".tmp.mp4"]);
   if (ok) fs.renameSync(out + ".tmp.mp4", out); else fs.rm(out + ".tmp.mp4", () => {});
