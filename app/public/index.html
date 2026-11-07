@@ -119,6 +119,16 @@
   .tline .now { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ok); opacity: .7; }
   .ctlrow { display: flex; gap: 8px; align-items: center; }
   .ctlrow .ib { background: var(--card2); width: 46px; height: 46px; }
+  details.grp { margin-bottom: 10px; }
+  details.grp > summary { list-style: none; display: flex; align-items: center; gap: 14px; padding: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; cursor: pointer; }
+  details.grp > summary::-webkit-details-marker { display: none; }
+  details.grp > summary::after { content: "›"; margin-left: auto; color: var(--dim); font-size: 22px; transition: transform .2s; }
+  details.grp[open] > summary { border-radius: 20px 20px 20px 20px; margin-bottom: 10px; }
+  details.grp[open] > summary::after { transform: rotate(90deg); }
+  details.grp .gi { width: 38px; height: 38px; border-radius: 12px; background: var(--card2); display: flex; align-items: center; justify-content: center; font-size: 17px; flex: none; }
+  details.grp b { display: block; font-size: 15px; }
+  details.grp i { display: block; font-style: normal; font-size: 11px; color: var(--dim); margin-top: 3px; }
+  .dayhead { padding: 12px 14px 6px; font-size: 11px; color: var(--dim); letter-spacing: 1.5px; text-transform: uppercase; border-bottom: 1px solid var(--line); }
   details.adv summary { padding: 14px 16px; cursor: pointer; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; list-style: none; }
   details.adv[open] summary { border-bottom: 1px solid var(--line); }
 </style>
@@ -161,7 +171,7 @@
         <button class="primary" id="liveBtn" onclick="toggleLive()">Live bekijken</button>
         <div class="row">
           <button class="talk" id="talkBtn" onclick="toggleTalk()">🎙 Praten</button>
-          <button onclick="openQuick()">💬 Snel antwoord</button>
+          <button onclick="openQuick()" id="quickBtn">💬 Snel antwoord</button>
         </div>
       </div>
     </div>
@@ -169,7 +179,7 @@
     <div class="stats">
       <div class="stat"><div class="k">Batterij</div><div class="v" id="sBat">--</div></div>
       <div class="stat"><div class="k">Wifi</div><div class="v" id="sWifi">--</div></div>
-      <div class="stat"><div class="k">Vandaag</div><div class="v" id="sToday">0</div></div>
+      <div class="stat"><div class="k" id="sTodayK">Aangebeld</div><div class="v" id="sToday">0</div></div>
     </div>
 
     <div id="modeCard"></div>
@@ -238,62 +248,70 @@
 
   <!-- ================= INSTELLINGEN ================= -->
   <section class="page" id="p-set">
-    <div class="sect">Opslag op je server</div>
-    <div class="card">
-      <div class="set" style="display:block">
-        <div class="l">Maximale opslag</div>
-        <div class="d">Is het vol, dan worden de oudste opnames automatisch verwijderd.</div>
-        <div class="row" style="align-items:center;margin-top:12px">
-          <input type="range" id="gbRange" min="1" max="500" step="1" oninput="$('#gbNum').value=this.value">
-          <input type="number" id="gbNum" min="0.5" step="0.5" style="width:90px;flex:none" oninput="$('#gbRange').value=this.value">
-          <span class="muted">GB</span>
-        </div>
-        <div id="gbInfo" class="d" style="margin-top:8px"></div>
-        <button class="primary" style="width:100%;margin-top:12px" onclick="saveStorage()">Opslaan</button>
+    <details class="grp" data-g="cams"><summary><span class="gi">◎</span><span><b>Camera's</b><i>Namen, deurbel of camera, timelapse per camera</i></span></summary>
+      <div class="card" id="camCard"></div>
+    </details>
+
+    <details class="grp" data-g="notif"><summary><span class="gi">🔔</span><span><b>Meldingen</b><i>Wanneer je telefoon een melding krijgt</i></span></summary>
+      <div class="card" id="notifCard"></div>
+    </details>
+
+    <details class="grp" data-g="rec"><summary><span class="gi">⏺</span><span><b>Opnemen en live</b><i>Wanneer en hoe lang er wordt opgenomen</i></span></summary>
+      <div class="card" id="recCard"></div>
+      <div class="card">
+        <div class="set"><div><div class="l">Live beeld stopt na</div><div class="d">Spaart de batterij van de deurbel</div></div>
+          <select id="liveMax" onchange="saveApp({liveMaxSeconds:Number(this.value)})">
+            <option value="60">1 min</option><option value="180">3 min</option><option value="300">5 min</option><option value="600">10 min</option><option value="1200">20 min</option>
+          </select></div>
       </div>
-      <div class="set"><div><div class="l">Automatisch downloaden</div><div class="d">Opnames van de deurbel naar je server halen</div></div></div>
-      <div class="set" style="padding-top:0"><div class="seg" id="autoSeg" style="width:100%">
-        <button data-v="important">Belangrijk</button><button data-v="all">Alles</button><button data-v="off">Uit</button>
-      </div></div>
-      <div class="set"><div><div class="l">Bewaren</div><div class="d">Opnames ouder dan dit verwijderen (0 = alleen GB-limiet)</div></div>
-        <span style="display:flex;align-items:center;gap:6px;flex:none"><input type="number" id="keepDays" min="0" style="width:72px;max-width:none" onchange="saveApp({keepDays:Number(this.value)})"> <span class="muted">dagen</span></span></div>
-    </div>
+    </details>
 
-    <div class="sect">Foto van de voordeur</div>
-    <div class="card" id="snapCard"></div>
+    <details class="grp" data-g="snap"><summary><span class="gi">🕐</span><span><b>Foto's en timelapse</b><i>Hoe vaak er een foto wordt gemaakt</i></span></summary>
+      <div class="card" id="snapCard"></div>
+    </details>
 
-    <div class="sect">Opnemen bij gebeurtenis</div>
-    <div class="card" id="recCard"></div>
+    <details class="grp" data-g="store"><summary><span class="gi">💾</span><span><b>Opslag</b><i id="storeSum">Hoeveel ruimte de app mag gebruiken</i></span></summary>
+      <div class="card">
+        <div class="set" style="display:block">
+          <div class="l">Maximale opslag</div>
+          <div class="d">Is het vol, dan worden de oudste opnames en timelapse-dagen automatisch verwijderd. Opnames met ★ blijven staan.</div>
+          <div class="row" style="align-items:center;margin-top:12px">
+            <input type="range" id="gbRange" min="1" max="500" step="1" oninput="$('#gbNum').value=this.value">
+            <input type="number" id="gbNum" min="0.5" step="0.5" style="width:90px;flex:none" oninput="$('#gbRange').value=this.value">
+            <span class="muted">GB</span>
+          </div>
+          <div id="gbInfo" class="d" style="margin-top:8px"></div>
+          <button class="primary" style="width:100%;margin-top:12px" onclick="saveStorage()">Opslaan</button>
+        </div>
+        <div class="set"><div><div class="l">Opnames bewaren</div><div class="d">Ouder dan dit verwijderen (0 = alleen de GB-limiet)</div></div>
+          <span style="display:flex;align-items:center;gap:6px;flex:none"><input type="number" id="keepDays" min="0" style="width:72px;max-width:none" onchange="saveApp({keepDays:Number(this.value)})"> <span class="muted">dagen</span></span></div>
+        <div id="autoDlRows" style="display:none">
+          <div class="set"><div><div class="l">Opnames van de deurbel ophalen</div><div class="d">Opnames die op de deurbel/HomeBase staan naar je server halen</div></div></div>
+          <div class="set" style="padding-top:0"><div class="seg" id="autoSeg" style="width:100%">
+            <button data-v="important">Belangrijk</button><button data-v="all">Alles</button><button data-v="off">Uit</button>
+          </div></div>
+        </div>
+      </div>
+    </details>
 
-    <div class="sect">Meldingen op je telefoon</div>
-    <div class="card" id="notifCard"></div>
+    <details class="grp" data-g="dev"><summary><span class="gi">⚙</span><span><b>Camera-instellingen</b><i id="devSum">Detectie, nachtzicht, volume…</i></span></summary>
+      <select id="setCam" class="devsel" style="display:none" onchange="pickSetCam(this.value)"></select>
+      <div class="card" id="settings"><div class="set"><div class="l muted">Laden…</div></div></div>
+      <div class="sect" id="stTitle" style="display:none">Basisstation</div>
+      <div class="card" id="stSettings" style="display:none"></div>
+      <div class="sect">Apparaat</div>
+      <div class="card" id="info"></div>
+      <div class="row" style="margin-bottom:14px"><button onclick="refreshDevice()">Vernieuwen</button><button onclick="rebootStation()">Herstarten</button></div>
+    </details>
 
-    <div class="sect">Live bekijken</div>
-    <div class="card">
-      <div class="set"><div><div class="l">Automatisch stoppen na</div><div class="d">Spaart de batterij van de deurbel</div></div>
-        <select id="liveMax" onchange="saveApp({liveMaxSeconds:Number(this.value)})">
-          <option value="60">1 min</option><option value="180">3 min</option><option value="300">5 min</option><option value="600">10 min</option><option value="1200">20 min</option>
-        </select></div>
-    </div>
+    <details class="grp" data-g="sec"><summary><span class="gi">🔒</span><span><b>Beveiliging</b><i>Pincode van de app en per camera</i></span></summary>
+      <div class="card" id="secCard"><div class="set"><div class="l muted">Laden…</div></div></div>
+    </details>
 
-    <div class="sect">Deurbel</div>
-    <div class="card" id="settings"><div class="set"><div class="l muted">Laden…</div></div></div>
-
-    <div class="sect" id="stTitle" style="display:none">Basisstation</div>
-    <div class="card" id="stSettings" style="display:none"></div>
-
-    <div class="sect" id="camSect" style="display:none">Camera's</div>
-    <div class="card" id="camCard" style="display:none"></div>
-
-    <div class="sect">Beveiliging</div>
-    <div class="card" id="secCard"><div class="set"><div class="l muted">Laden…</div></div></div>
-
-    <div class="sect">Updates</div>
-    <div class="card" id="updCard"><div class="set"><div class="l muted">Laden…</div></div></div>
-
-    <div class="sect">Apparaat</div>
-    <div class="card" id="info"></div>
-    <div class="row" style="margin-top:4px"><button onclick="refreshDevice()">Vernieuwen</button><button onclick="rebootStation()">Herstarten</button></div>
+    <details class="grp" data-g="upd"><summary><span class="gi">⬆</span><span><b>Updates</b><i id="updSum">Automatisch via GitHub</i></span></summary>
+      <div class="card" id="updCard"><div class="set"><div class="l muted">Laden…</div></div></div>
+    </details>
+    <div class="muted" style="text-align:center;margin:18px 0 6px">Deurbel · eigen app voor je Eufy-camera's</div>
   </section>
 </div>
 
@@ -346,7 +364,12 @@ const NL = {
   dualCamWatchViewMode: ["Weergave tweede camera", ""], ringAutoResponse: ["Automatisch antwoorden", "Bericht afspelen als er wordt aangebeld"],
   ringAutoResponseVoiceResponse: ["Automatisch: spraakbericht", ""], ringAutoResponseVoiceResponseVoice: ["Automatisch: welk bericht", ""],
   ringAutoResponseTimeFrom: ["Automatisch antwoorden vanaf", ""], ringAutoResponseTimeTo: ["Automatisch antwoorden tot", ""],
-  guardMode: ["Beveiligingsmodus", ""], alarmVolume: ["Volume alarm", ""], promptVolume: ["Volume meldingsgeluid", ""],
+  guardMode: ["Beveiligingsmodus", ""],
+  alarmArmDelay: ["Vertraging bij inschakelen", "Seconden voordat het alarm actief wordt"], alarmDelay: ["Alarmvertraging", "Seconden voordat het alarm afgaat"],
+  alarmDelayType: ["Soort alarmvertraging", ""], autoEndAlarm: ["Alarm automatisch stoppen", ""], turnOffAlarmWithButton: ["Alarm uit met knop", ""],
+  switchModeWithAccessCode: ["Modus wisselen met code", ""], crossCameraTracking: ["Volgen over camera's heen", ""],
+  continuousTrackingTime: ["Volgtijd", ""], trackingAssistance: ["Volghulp", ""], sdStatus: ["SD-kaart", ""], storageInfoEmmc: ["Opslag", ""],
+  alarmTone: ["Alarmgeluid", ""], timeZone: ["Tijdzone", ""], stationHomeSecuritySettings: ["Thuis-instellingen", ""], alarmVolume: ["Volume alarm", ""], promptVolume: ["Volume meldingsgeluid", ""],
   timeFormat: ["Tijdnotatie", ""], alarmTone: ["Alarmgeluid", ""], notificationSwitchModeSchedule: ["Melding bij moduswissel (schema)", ""],
   notificationSwitchModeApp: ["Melding bij moduswissel (app)", ""], notificationStartAlarmDelay: ["Melding bij alarmvertraging", ""],
 };
@@ -489,8 +512,10 @@ function renderDevice() {
   $("#liveBtn").textContent = isLive ? "Stoppen" : "Live bekijken";
   $("#liveBtn").className = isLive ? "red" : "primary";
   $("#talkBtn").classList.toggle("on", !!talking);
+  $("#quickBtn").style.display = d.voices && d.voices.length ? "" : "none";
+  $("#sTodayK").textContent = d.isDoorbell === false ? "Vandaag" : "Aangebeld";
   $("#talkBtn").textContent = talking ? "■ Stop praten" : "🎙 Praten";
-  renderMode(d); renderSettings(d); renderInfo(d);
+  renderMode(d); renderSettings(d); renderInfo(d); renderSetCam();
 }
 async function snapNow() {
   const d = dev(); if (!d) return;
@@ -572,7 +597,7 @@ async function snooze(sec) {
 }
 
 // ---------- live met geluid ----------
-let chase, liveAbort = null;
+let chase, liveAbort = null, liveClock = null, liveStartedAt = 0;
 function toggleLive() { isLive ? stopLive() : startLive(); }
 function startLive() {
   const d = dev(); if (!d) return toast("Geen deurbel");
@@ -584,7 +609,13 @@ function startLive() {
   v.style.display = "none";
   v.muted = muted;
   v.onloadedmetadata = () => fitView(v.videoWidth, v.videoHeight);
-  v.onplaying = () => { empty.style.display = "none"; v.style.display = ""; $("#liveCtl").style.display = ""; $("#viewBadgeTxt").textContent = "Live"; };
+  v.onplaying = () => {
+    empty.style.display = "none"; v.style.display = ""; $("#liveCtl").style.display = "";
+    if (!liveStartedAt) liveStartedAt = Date.now();
+    clearInterval(liveClock);
+    const tick = () => { const sec = Math.floor((Date.now() - liveStartedAt) / 1000); $("#viewBadgeTxt").textContent = `Live · ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; };
+    tick(); liveClock = setInterval(tick, 1000);
+  };
   const url = `/api/device/${d.serial}/live.mp4?t=${Date.now()}`;
   if (window.MediaSource) playMse(url, v).catch((e) => { if (isLive) { stopLive(true); toast("Live beeld gestopt" + (e && e.message && e.name !== "AbortError" ? ": " + e.message : "")); } });
   else { v.src = url; v.onerror = v.onended = () => { if (isLive) { stopLive(true); toast("Live beeld gestopt"); } }; tryPlay(v); }
@@ -655,7 +686,7 @@ function findInit(buf) {
 }
 function stopLive(silent) {
   const d = dev();
-  isLive = false; clearInterval(chase);
+  isLive = false; clearInterval(chase); clearInterval(liveClock); liveStartedAt = 0;
   try { liveAbort?.abort(); } catch {}
   liveAbort = null;
   const v = $("#liveVideo");
@@ -724,10 +755,22 @@ function evRow(e) {
 }
 function renderRecent() {
   const today = new Date().toDateString();
-  $("#sToday").textContent = recent.filter((e) => new Date(e.time).toDateString() === today && e.kind === "ring").length;
+  const isCam = dev()?.isDoorbell === false;
+  $("#sToday").textContent = recent.filter((e) => new Date(e.time).toDateString() === today && (isCam || e.kind === "ring")).length;
   $("#recent").innerHTML = recent.length ? recent.slice(0, 5).map(evRow).join("") : `<div class="pad muted">Nog niks gebeurd. Zodra ${viewKind === "camera" ? "er iets gebeurt" : "iemand aanbelt"} zie je het hier.</div>`;
 }
-function renderLog() { $("#log").innerHTML = logItems.length ? logItems.map(evRow).join("") : '<div class="pad muted">Geen gebeurtenissen</div>'; }
+function dayLabel(t) {
+  const d = new Date(t), now = new Date(), y = new Date(); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) return "Vandaag";
+  if (d.toDateString() === y.toDateString()) return "Gisteren";
+  return d.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" });
+}
+function withDays(items, timeOf, row) {
+  let last = "", h = "";
+  for (const it of items) { const dl = dayLabel(timeOf(it)); if (dl !== last) { h += `<div class="dayhead">${dl}</div>`; last = dl; } h += row(it); }
+  return h;
+}
+function renderLog() { $("#log").innerHTML = logItems.length ? withDays(logItems, (e) => e.time, evRow) : '<div class="pad muted">Geen gebeurtenissen</div>'; }
 async function loadRecent() { const d = dev(); if (!d || d.locked) { recent = []; return renderRecent(); } recent = (await api("/api/events?serial=" + d.serial)).events; renderRecent(); }
 async function loadLog() { const j = await api("/api/events?x=1" + (logKind ? "&kind=" + logKind : "") + camQ()); logItems = j.events; renderLog(); $("#moreBtn").style.display = j.events.length >= 50 ? "" : "none"; }
 async function loadMore() {
@@ -777,7 +820,7 @@ function recRow(r) {
     <div class="end" id="rs-${r.id}">${st}</div></div>`;
 }
 function renderRec() {
-  $("#recList").innerHTML = recItems.length ? recItems.map(recRow).join("") : '<div class="pad muted">Nog geen opnames. Ze verschijnen hier zodra de deurbel iets heeft opgenomen.</div>';
+  $("#recList").innerHTML = recItems.length ? withDays(recItems, (r) => r.start, recRow) : '<div class="pad muted">Nog geen opnames. Ze verschijnen hier zodra de deurbel iets heeft opgenomen.</div>';
 }
 function renderStorage() {
   if (!storage) return;
@@ -785,6 +828,7 @@ function renderStorage() {
   $("#storageCard").innerHTML = `<div class="row" style="justify-content:space-between;align-items:baseline"><div style="font-family:var(--dot);font-weight:900;font-size:26px">${gb(storage.used)}</div><div class="muted">van ${gb(storage.limit)}</div></div>
     <div class="bar"><i class="${pct > 90 ? "full" : ""}" style="width:${pct}%"></i></div>
     <div class="muted">${storage.count} opname${storage.count === 1 ? "" : "s"} opgeslagen${storage.timelapse ? " · timelapse " + gb(storage.timelapse) : ""}${storage.diskFree != null ? " · " + gb(storage.diskFree) + " vrij op de schijf" : ""}${S.queue ? " · " + S.queue + " in wachtrij" : ""}</div>`;
+  $("#storeSum").textContent = `${gb(storage.used)} van ${gb(storage.limit)} gebruikt`;
   $("#gbInfo").textContent = `Nu in gebruik: ${gb(storage.used)}${storage.diskFree != null ? " · vrij op schijf: " + gb(storage.diskFree) : ""}`;
 }
 async function loadRec(more) {
@@ -973,6 +1017,28 @@ async function findCams(btn) {
   btn.disabled = false; btn.textContent = "🔍 Nieuwe camera's zoeken";
 }
 
+// uitklapgroepen onthouden
+document.querySelectorAll("details.grp").forEach((d) => {
+  if ((localStorage.getItem("grpOpen") || "").split(",").includes(d.dataset.g)) d.open = true;
+  d.addEventListener("toggle", () => {
+    localStorage.setItem("grpOpen", [...document.querySelectorAll("details.grp")].filter((x) => x.open).map((x) => x.dataset.g).join(","));
+  });
+});
+// welke camera bij Camera-instellingen
+function renderSetCam() {
+  const el = $("#setCam"); if (!el) return;
+  el.style.display = S.devices.length > 1 ? "" : "none";
+  const html = S.devices.map((d) => `<option value="${d.serial}" ${d.serial === cur ? "selected" : ""}>${d.locked ? "🔒 " : ""}${esc(d.name)}${d.isDoorbell === false ? "" : " (deurbel)"}</option>`).join("");
+  if (el._h !== html) { el.innerHTML = html; el._h = html; }
+  el.value = cur;
+  const d = dev(); if (d) $("#devSum").textContent = `${d.name} · detectie, nachtzicht, volume…`;
+}
+function pickSetCam(sn) {
+  const d = S.devices.find((x) => x.serial === sn); if (!d) return;
+  viewKind = d.isDoorbell === false ? "camera" : "doorbell"; kindCur[viewKind] = sn; cur = sn; settingsKey = "";
+  renderDevice();
+}
+
 // ---------- beveiliging ----------
 async function loadSecurity() {
   const j = await api("/api/security").catch(() => null);
@@ -1011,6 +1077,8 @@ async function loadUpdate() {
   if (!u.installed) { el.innerHTML = '<div class="set"><div class="d">Automatische updates zijn nog niet ingesteld. Installeer via GitHub (zie README) om ze aan te zetten.</div></div>'; return; }
   const when = (t) => t ? new Date(t).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "?";
   const color = { ok: "var(--ok)", available: "var(--fg)", updating: "var(--fg)", error: "var(--red)" }[u.state] || "var(--dim)";
+  $("#updSum").textContent = u.state === "available" ? "Update beschikbaar!" : u.state === "updating" ? "Bezig met bijwerken…" : u.state === "error" ? "Probleem bij bijwerken" : `Versie ${u.current} · up-to-date`;
+  $("#updSum").style.color = u.state === "available" || u.state === "error" ? "var(--red)" : "";
   el.innerHTML = `<div class="set"><div><div class="l">Versie ${esc(u.current)}</div><div class="d">${esc(u.currentTitle || "")}${u.currentDate ? " · " + when(u.currentDate) : ""}</div></div></div>
     <div class="set"><div><div class="l" style="color:${color}">${u.state === "updating" ? '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin:0 6px 0 0;vertical-align:middle"></span>' : ""}${esc(u.message)}</div>
       <div class="d">${u.state === "available" ? "Nieuw: " + esc(u.latestTitle) + "<br>" : ""}Laatst gecontroleerd: ${when(u.checkedAt)} · ${u.auto ? `automatisch elke ${u.hours} uur` : "automatisch bijwerken staat uit"}</div></div></div>
@@ -1032,13 +1100,12 @@ async function loadAppSettings() {
   loadUpdate(); loadSecurity(); // tegelijk ophalen, niet op elkaar wachten
   const j = await api("/api/settings").catch(() => null);
   if (!j) return;
-  S.settings = j.settings; storage = j.storage;
+  S.settings = j.settings; storage = j.storage; S.remoteCount = j.remoteCount || 0;
   renderAppSettings(); renderStorage();
 }
 function renderAppSettings() {
   const s = S.settings || {};
   const multi = S.devices.length > 1;
-  $("#camSect").style.display = $("#camCard").style.display = "";
   const TL_OPTS = [[0, "Zoals hierboven"], [10, "Continu · elke 10 sec"], [30, "Continu · elke 30 sec"], [60, "Continu · elke minuut"], [120, "Continu · elke 2 min"], [300, "Elke 5 min"], [900, "Elke 15 min"], [1800, "Elke 30 min"], [3600, "Elk uur"], [-1, "Uit"]];
   const est = (sec) => sec > 0 ? ` · ±${gb((86400 / sec) * 120000)} per dag` : "";
   if (!$("#camCard").contains(document.activeElement)) $("#camCard").innerHTML = S.devices.map((d) => {
@@ -1050,7 +1117,7 @@ function renderAppSettings() {
       <div class="row" style="align-items:center;margin-top:10px"><span class="muted" style="width:90px;flex:none">Naam</span><input type="text" value="${esc(d.name === d.serial ? "" : d.name)}" placeholder="bv. Voordeur" maxlength="40" style="max-width:none;flex:1" onchange="saveApp({names:{'${d.serial}':this.value}})"></div>
       <div class="row" style="align-items:center;margin-top:8px"><span class="muted" style="width:90px;flex:none">Soort</span><select style="max-width:none;flex:1" onchange="saveApp({cams:{'${d.serial}':{kind:this.value}}})">${[["auto", `Automatisch (${d.isDoorbell === false ? "camera" : "deurbel"})`], ["doorbell", "Deurbel"], ["camera", "Camera"]].map(([v, l]) => `<option value="${v}" ${(c.kind || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       <div class="row" style="align-items:center;margin-top:8px"><span class="muted" style="width:90px;flex:none">Timelapse</span><select style="max-width:none;flex:1" onchange="saveApp({cams:{'${d.serial}':{tlSeconds:Number(this.value)}}})">${TL_OPTS.map(([v, l]) => `<option value="${v}" ${tl === v ? "selected" : ""}>${l}</option>`).join("")}${TL_OPTS.some(([v]) => v === tl) ? "" : `<option selected value="${tl}">Elke ${tl} sec</option>`}</select></div>
-      <div class="d" style="margin:6px 0 8px 98px">${eff ? (tl > 0 && tl <= 120 ? "De stream blijft open en er wordt continu een beeld bewaard." : "De camera wordt steeds even wakker gemaakt voor een foto.") + est(eff) : "Geen timelapse voor deze camera."}${tl > 0 && tl <= 120 && onBattery ? '<br><span style="color:var(--red)">Let op: deze camera lijkt op batterij te werken, continu kost veel batterij.</span>' : ""}</div>
+      <div class="d" style="margin:6px 0 8px 98px">${eff ? (tl > 0 && tl <= 120 ? "De stream blijft open en er wordt continu een beeld bewaard." : "De camera wordt steeds even wakker gemaakt voor een foto.") + est(eff) : "Geen timelapse voor deze camera."}${tl > 0 && tl <= 120 && onBattery ? '<br><span style="color:var(--red)">Werkt deze camera op batterij? Dan is continu af te raden: de batterij is dan snel leeg.</span>' : ""}</div>
     </div>`;
   }).join("")
     + (multi ? `<div class="set"><div><div class="l">Standaard camera</div><div class="d">Deze zie je als eerste als je de app opent</div></div>
@@ -1058,6 +1125,7 @@ function renderAppSettings() {
     + `<div class="set"><button onclick="findCams(this)">🔍 Nieuwe camera's zoeken</button></div>`;
   if (document.activeElement !== $("#gbNum")) { $("#gbNum").value = s.storageGb; $("#gbRange").value = Math.min(500, s.storageGb); }
   $("#autoSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === s.autoDownload));
+  $("#autoDlRows").style.display = S.remoteCount ? "" : "none";
   if (document.activeElement !== $("#keepDays")) $("#keepDays").value = s.keepDays ?? 0;
   $("#liveMax").value = String(s.liveMaxSeconds);
   if (![...$("#liveMax").options].some((o) => o.value === String(s.liveMaxSeconds))) $("#liveMax").insertAdjacentHTML("beforeend", `<option value="${s.liveMaxSeconds}" selected>${Math.round(s.liveMaxSeconds / 60)} min</option>`);
@@ -1123,8 +1191,10 @@ function renderSettings(d) {
   const st = d.station;
   const show = st && st.settings.length && st.serial !== d.serial;
   $("#stTitle").style.display = $("#stSettings").style.display = show ? "" : "none";
-  if (show) $("#stSettings").innerHTML = st.settings.map((s) => row(s, "st")).join("");
-  else if (st && st.settings.length) $("#settings").insertAdjacentHTML("beforeend", st.settings.map((s) => row(s, "st")).join(""));
+  const stKnown = st ? st.settings.filter((x) => NL[x.name]) : [], stRest = st ? st.settings.filter((x) => !NL[x.name]) : [];
+  const stHtml = stKnown.map((x) => row(x, "st")).join("") + (stRest.length ? `<details class="adv"><summary>Meer instellingen (${stRest.length}) ›</summary>${stRest.map((x) => row(x, "st")).join("")}</details>` : "");
+  if (show) $("#stSettings").innerHTML = stHtml;
+  else if (st && st.settings.length) $("#settings").insertAdjacentHTML("beforeend", stHtml);
 }
 async function setProp(scope, name, value) {
   const d = dev(); if (!d) return;

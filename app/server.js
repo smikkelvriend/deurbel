@@ -478,6 +478,17 @@ const lastNotified = {};
 function addEvent(serial, kind, detail) {
   const now = Date.now();
   if (events.find((x) => x.serial === serial && x.kind === kind && now - x.time < 15000)) return;
+  // beweging en persoon komen vaak tegelijk binnen: één gebeurtenis van maken
+  const rank = { motion: 1, person: 2, package: 2, ring: 3 };
+  const near = events.find((x) => x.serial === serial && now - x.time < 15000 && rank[x.kind] && rank[kind]);
+  if (near && kind === "motion") return; // er is al iets belangrijkers
+  if (near && near.kind === "motion" && rank[kind] > 1) {
+    near.kind = kind; if (detail && typeof detail === "string" && detail !== "Unknown") near.detail = detail;
+    saveEvents(); broadcast({ type: "event-update", event: near });
+    notify(near).catch(() => {});
+    startRecording(serial, kind, near).catch(() => {});
+    return;
+  }
   const d = state.devices[serial];
   const ev = { id: crypto.randomUUID(), serial, device: displayName(serial), kind, time: now };
   if (detail && typeof detail === "string" && detail !== "Unknown") ev.detail = detail;
@@ -1508,7 +1519,7 @@ async function api(req, res, url) {
   }
 
   // --- app-instellingen + opslag ---
-  if (p === "/api/settings" && !post) return json(res, 200, { settings, storage: await storageInfo() });
+  if (p === "/api/settings" && !post) return json(res, 200, { settings, storage: await storageInfo(), remoteCount: recordings.filter((r) => r.status === "remote" && !r.removed).length });
   if (p === "/api/settings" && post) {
     const b = await readBody(req);
     const num = (v, lo, hi) => Math.min(hi, Math.max(lo, Number(v)));
