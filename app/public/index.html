@@ -330,6 +330,9 @@
     <details class="grp admin-only" data-g="upd"><summary><span class="gi">⬆</span><span><b>Updates</b><i id="updSum">Automatisch via GitHub</i></span></summary>
       <div class="card" id="updCard"><div class="set"><div class="l muted">Laden…</div></div></div>
     </details>
+    <details class="grp" data-g="app" id="appGrp" style="display:none"><summary><span class="gi">📱</span><span><b>Android-app</b><i id="appSum">Meldingen en server-adres</i></span></summary>
+      <div class="card" id="appCard"></div>
+    </details>
     <div class="muted" style="text-align:center;margin:18px 0 6px">Deurbel · eigen app voor je Eufy-camera's</div>
   </section>
 </div>
@@ -469,7 +472,15 @@ function go(p) {
 window.addEventListener("hashchange", route);
 function route() {
   const h = location.hash.slice(1) || "deur";
-  if (h === "live") { go("deur"); history.replaceState(null, "", "#deur"); if (!isLive) setTimeout(startLive, 300); return; }
+  if (h === "live" || h.startsWith("live=")) {
+    const sn = h.split("=")[1];
+    const d = S.devices.find((x) => x.serial === sn);
+    const page = d && d.isDoorbell === false ? "cam" : "deur";
+    go(page); history.replaceState(null, "", "#" + page);
+    if (d && cur !== sn) { if (isLive) stopLive(); cur = sn; kindCur[viewKind] = sn; renderDevice(); }
+    if (!isLive) setTimeout(startLive, 300);
+    return;
+  }
   go(PAGES.includes(h) ? h : "deur");
 }
 
@@ -1080,6 +1091,27 @@ async function findCams(btn) {
   btn.disabled = false; btn.textContent = "🔍 Nieuwe camera's zoeken";
 }
 
+// ---------- binnen de Android-app ----------
+function renderAppGroup() {
+  const A = window.DeurbelApp; if (!A) return;
+  $("#appGrp").style.display = "";
+  $("#appSum").textContent = `Versie ${A.version()} · meldingen ${A.serviceOn() ? "aan" : "uit"}`;
+  $("#appCard").innerHTML = `
+    <div class="set"><div><div class="l">Meldingen via de app</div><div class="d">De app houdt verbinding met je server en meldt direct. ntfy is dan niet meer nodig.</div></div><label class="sw"><input type="checkbox" ${A.serviceOn() ? "checked" : ""} onchange="DeurbelApp.setServiceOn(this.checked);setTimeout(renderAppGroup,300)"><span></span></label></div>
+    <div class="set"><div><div class="l">Batterijbesparing uitzetten</div><div class="d">Aanrader: anders kan Android de verbinding op de achtergrond verbreken</div></div><button class="small" onclick="DeurbelApp.askBatteryExemption()">Instellen</button></div>
+    <div class="set"><div><div class="l">Meldingsgeluiden</div><div class="d">Geluid en trillen per soort melding</div></div><button class="small" onclick="DeurbelApp.openNotificationSettings()">Openen</button></div>
+    <div class="set"><div><div class="l">Server-adres</div><div class="d">${esc(location.origin)}</div></div><button class="small" onclick="DeurbelApp.changeServer()">Wijzigen</button></div>
+    <div class="set"><div><div class="l">App-versie ${esc(A.version())}</div><div class="d">Nieuwe versies komen vanzelf van GitHub</div></div><button class="small" onclick="DeurbelApp.checkUpdate()">Controleren</button></div>`;
+}
+// Tip in de browser: er is ook een Android-app
+function renderAppTip() {
+  if (window.DeurbelApp || !/Android/i.test(navigator.userAgent) || localStorage.getItem("appTipHidden")) return;
+  $("#appGrp").style.display = "";
+  $("#appSum").textContent = "Download de app voor directe meldingen";
+  $("#appCard").innerHTML = `<div class="set"><div><div class="l">Deurbel voor Android</div><div class="d">Een echte app met eigen meldingen (zonder ntfy), sneller live beeld en opnames opslaan in je Downloads.</div></div></div>
+    <div class="set row"><button class="primary" onclick="location.href='https://github.com/smikkelvriend/deurbel/releases/download/apk-latest/Deurbel.apk'">⬇ Download APK</button><button onclick="localStorage.setItem('appTipHidden',1);$('#appGrp').style.display='none'">Verbergen</button></div>`;
+}
+
 // uitklapgroepen onthouden
 document.querySelectorAll("details.grp").forEach((d) => {
   if ((localStorage.getItem("grpOpen") || "").split(",").includes(d.dataset.g)) d.open = true;
@@ -1225,6 +1257,7 @@ async function updAction(a) {
 // ---------- app-instellingen ----------
 async function loadAppSettings() {
   loadUpdate(); loadSecurity(); // tegelijk ophalen, niet op elkaar wachten
+  try { renderAppGroup(); renderAppTip(); } catch {}
   const j = await api("/api/settings").catch(() => null);
   if (!j) return;
   S.settings = j.settings; storage = j.storage; S.remoteCount = j.remoteCount || 0;
@@ -1404,6 +1437,7 @@ function connectStream() {
         renderDevice(); break;
       }
       case "event":
+        if (recent.some((e) => e.id === msg.event.id) || logItems.some((e) => e.id === msg.event.id)) break;
         if (msg.event.serial === cur) { recent.unshift(msg.event); renderRecent(); }
         if ((!logKind || logKind === msg.event.kind) && (!camF || camF === msg.event.serial)) { logItems.unshift(msg.event); renderLog(); }
         if (msg.event.kind === "ring") { toast(`Er wordt aangebeld${S.devices.length > 1 ? " (" + msg.event.device + ")" : ""}!`); navigator.vibrate?.([200, 100, 200]); }

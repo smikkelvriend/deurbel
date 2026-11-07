@@ -3,3 +3,8 @@ deurbel-data/
 eufy-data/
 app/data/
 *.zip
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.kotlin/

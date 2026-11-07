@@ -1,0 +1,38 @@
+# Bouwt de Android-app bij elke wijziging en zet hem als "apk-latest" op de Releases-pagina.
+name: Android-app bouwen
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: APK bouwen
+        run: gradle -p android assembleRelease --no-daemon
+      - name: Op GitHub zetten
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk Deurbel.apk
+          gh release delete apk-latest --yes --cleanup-tag || true
+          gh release create apk-latest Deurbel.apk \
+            --title "Deurbel-app 1.${{ github.run_number }}" \
+            --notes "Nieuwste versie van de Deurbel-app voor Android. Download **Deurbel.apk** hieronder en open hem op je telefoon.
+
+          versionCode: ${{ github.run_number }}"

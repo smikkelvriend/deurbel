@@ -102,6 +102,18 @@ Open het dashboard en vul daar de code uit je mail in. Er verschijnt vanzelf een
    - Zet de meldingen in ntfy op **Urgent**, zodat aanbellen ook doorkomt als je telefoon op stil staat.
    - Tik in het dashboard op Instellingen → **Testmelding sturen**.
 
+## Android-app
+
+Liever een echte app dan de web-app? Download **[Deurbel.apk](https://github.com/smikkelvriend/deurbel/releases/download/apk-latest/Deurbel.apk)** op je telefoon en open hem.
+Android vraagt dan of je apps uit deze bron wilt toestaan; zeg ja.
+
+- Bij de eerste keer vul je het adres van je server in, bijvoorbeeld `http://192.168.0.236:8095`, en log je in met je pincode.
+- **Meldingen komen rechtstreeks van je server.** ntfy is niet meer nodig. Zet onder Instellingen → Android-app de batterijbesparing voor Deurbel uit, anders kan Android de verbinding verbreken.
+- Bij aanbellen gaat je scherm aan en krijg je een melding met de foto. Tik op **Live bekijken** om meteen het beeld te openen.
+- Opnames en foto's die je opslaat, komen in `Downloads/Deurbel`.
+- Nieuwe versies worden door GitHub gebouwd. De app meldt zelf als er een update is.
+- Buiten de deur werken meldingen en live beeld alleen via Tailscale (zie hieronder).
+
 ## 7. Onderweg kijken en terugpraten (Tailscale)
 
 Je browser geeft de microfoon alleen vrij via **HTTPS**. Tailscale regelt dat gratis en zorgt er tegelijk voor dat je ook buiten de deur kunt kijken:

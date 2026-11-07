@@ -134,7 +134,7 @@ const displayName = (sn) => settings.names?.[sn] || state.devices[sn]?.props?.na
 const deviceAllowed = (sn) => !ENV.deviceSerial || ENV.deviceSerial === sn;
 
 let events = readJson(path.join(ENV.dataDir, "events.json"), []);
-const saveEvents = () => writeJson(path.join(ENV.dataDir, "events.json"), events);
+const saveEvents = () => writeJson(path.join(ENV.dataDir, "events.json"), events.map(({ _decided, ...e }) => e));
 let recordings = readJson(path.join(ENV.dataDir, "recordings.json"), []);
 const saveRecordings = () => writeJson(path.join(ENV.dataDir, "recordings.json"), recordings);
 for (const r of recordings) if (r.status === "downloading") r.status = r.file ? "done" : "remote";
@@ -506,7 +506,9 @@ function addEvent(serial, kind, detail) {
   if (near && kind === "motion") return; // er is al iets belangrijkers
   if (near && near.kind === "motion" && rank[kind] > 1) {
     near.kind = kind; if (detail && typeof detail === "string" && detail !== "Unknown") near.detail = detail;
+    near._decided = false; const wasPushed = near.push; decidePush(near);
     saveEvents(); broadcast({ type: "event-update", event: near });
+    if (near.push && !wasPushed) broadcast({ type: "event", event: near }); // app alsnog laten melden
     notify(near).catch(() => {});
     startRecording(serial, kind, near).catch(() => {});
     return;
@@ -521,6 +523,7 @@ function addEvent(serial, kind, detail) {
   }
   saveEvents();
   log("Gebeurtenis:", LABELS[kind] || kind, ev.device);
+  decidePush(ev);
   broadcast({ type: "event", event: ev });
   notify(ev).catch((e) => log("Melding mislukt:", e.message));
   startRecording(serial, kind, ev).catch((e) => log("Opnemen mislukt:", e.message));
@@ -558,16 +561,23 @@ function recipients(serial) {
   for (const u of sec.users || []) if (u.topic && u.notify !== false && userSeesCam(u, serial) && !out.includes(u.topic)) out.push(u.topic);
   return out;
 }
-async function notify(ev) {
-  const topics = recipients(ev.serial);
-  if (!topics.length) return;
+// Beslist één keer per gebeurtenis of er een melding komt (voor ntfy én de Android-app)
+function decidePush(ev) {
+  if (ev._decided) return ev.push;
+  ev._decided = true;
   const why = notifyBlocked(ev);
-  if (why) { log(`Geen melding (${why}):`, LABELS[ev.kind] || ev.kind); return; }
+  if (why) { log(`Geen melding (${why}):`, LABELS[ev.kind] || ev.kind); ev.push = false; return false; }
   if (ev.kind !== "ring") {
     const key = ev.serial + ":" + ev.kind;
-    if (lastNotified[key] && ev.time - lastNotified[key] < settings.motionCooldown * 1000) return;
+    if (lastNotified[key] && ev.time - lastNotified[key] < settings.motionCooldown * 1000) { ev.push = false; return false; }
     lastNotified[key] = ev.time;
   }
+  ev.push = true;
+  return true;
+}
+async function notify(ev) {
+  const topics = recipients(ev.serial);
+  if (!decidePush(ev) || !topics.length) return;
   const title = LABELS[ev.kind] || "Deurbel";
   const time = new Date(ev.time).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit", timeZone: ENV.tz });
   const message = `${displayName(ev.serial)} - ${time}${ev.detail ? " - " + ev.detail : ""}`;
