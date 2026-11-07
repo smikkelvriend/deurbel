@@ -67,7 +67,8 @@
   .chip.on { background: var(--fg); color: #000; border-color: var(--fg); }
   nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.92); backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: flex; justify-content: center; padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
   nav .in { display: flex; max-width: 560px; width: 100%; }
-  nav a { flex: 1; text-align: center; padding: 12px 0 14px; color: var(--dim); text-decoration: none; font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; }
+  nav a { flex: 1; text-align: center; padding: 12px 0 14px; color: var(--dim); text-decoration: none; font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; white-space: nowrap; }
+  nav.five a { font-size: 9px; letter-spacing: .6px; }
   nav a.on { color: var(--fg); }
   nav a .ic { display: block; font-size: 19px; margin-bottom: 3px; }
   .page { display: none; } .page.on { display: block; }
@@ -134,7 +135,7 @@
 
 <div class="wrap">
   <header>
-    <h1>Deurbel</h1>
+    <h1 id="pageTitle">Deurbel</h1>
     <div class="status"><span id="led" class="led"></span><span id="statusTxt">Verbinden</span></div>
   </header>
   <div id="banners"></div>
@@ -298,6 +299,7 @@
 
 <nav><div class="in">
   <a href="#deur" class="on" data-p="deur"><span class="ic">◉</span>Deur</a>
+  <a href="#cam" data-p="cam" id="navCam" style="display:none"><span class="ic">◎</span>Camera's</a>
   <a href="#rec" data-p="rec"><span class="ic">▶</span>Opnames</a>
   <a href="#log" data-p="log"><span class="ic">≡</span>Log</a>
   <a href="#set" data-p="set"><span class="ic">⚙</span>Instellingen</a>
@@ -383,7 +385,11 @@ function ago(t) {
 }
 const gb = (b) => b == null ? "?" : b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e8 ? (b / 1e6).toFixed(0) + " MB" : (b / 1e6).toFixed(1) + " MB";
 const dur = (s) => s ? (s >= 60 ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") : "0:" + String(s).padStart(2, "0")) : "";
-const dev = () => S.devices.find((d) => d.serial === cur) || S.devices[0];
+let viewKind = "doorbell";
+const kindCur = { doorbell: localStorage.getItem("curDoor") || "", camera: localStorage.getItem("curCam") || "" };
+const ofKind = (k) => S.devices.filter((d) => (k === "doorbell" ? d.isDoorbell !== false : d.isDoorbell === false));
+const kindList = () => { const l = ofKind(viewKind); return l.length ? l : S.devices; };
+const dev = () => S.devices.find((d) => d.serial === cur) || kindList()[0] || S.devices[0];
 
 // ---------- login ----------
 function showLogin() { $("#login").classList.add("on"); setTimeout(() => $("#pin").focus(), 50); }
@@ -396,10 +402,23 @@ async function doLogin() {
 $("#pin").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
 
 // ---------- navigatie ----------
-const PAGES = ["deur", "rec", "log", "set"];
+const PAGES = ["deur", "cam", "rec", "log", "set"];
+function setKind(k) {
+  if (viewKind === k && cur && ofKind(k).some((d) => d.serial === cur)) return;
+  if (isLive) stopLive();
+  if (cur) kindCur[viewKind] = cur;
+  viewKind = k;
+  const list = ofKind(k);
+  cur = list.some((d) => d.serial === kindCur[k]) ? kindCur[k] : (list[0]?.serial || cur);
+  settingsKey = ""; $("#lockPanel").dataset.sn = "";
+  renderDevice(); loadRecent().catch(() => {});
+}
 function go(p) {
-  document.querySelectorAll(".page").forEach((el) => el.classList.toggle("on", el.id === "p-" + p));
+  const page = p === "cam" ? "deur" : p;
+  document.querySelectorAll(".page").forEach((el) => el.classList.toggle("on", el.id === "p-" + page));
   document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("on", a.dataset.p === p));
+  if (p === "deur" || p === "cam") setKind(p === "cam" ? "camera" : "doorbell");
+  $("#pageTitle").textContent = p === "cam" ? "Camera's" : "Deurbel";
   if (p === "log" && !logItems.length) loadLog();
   if (p === "rec") loadRec();
   if (p === "set") loadAppSettings();
@@ -432,12 +451,19 @@ async function sendCaptcha() { try { await api("/api/auth/captcha", { method: "P
 
 function renderDevice() {
   const sel = $("#devsel");
-  if (S.devices.length > 1) { sel.style.display = ""; sel.innerHTML = S.devices.map((d) => `<option value="${d.serial}" ${d.serial === cur ? "selected" : ""}>${d.locked ? "🔒 " : ""}${esc(d.name)}</option>`).join(""); }
+  const kl = kindList();
+  if (kl.length > 1) { sel.style.display = ""; sel.innerHTML = kl.map((d) => `<option value="${d.serial}" ${d.serial === cur ? "selected" : ""}>${d.locked ? "🔒 " : ""}${esc(d.name)}</option>`).join(""); }
   else sel.style.display = "none";
+  const hasCams = ofKind("camera").length > 0;
+  $("#navCam").style.display = hasCams ? "" : "none";
+  document.querySelector("nav").classList.toggle("five", hasCams);
   renderCamSelects();
   const d = dev(); if (!d) return;
   if (!cur) cur = d.serial;
-  $("#recentCam").textContent = S.devices.length > 1 ? "· " + d.name : "";
+  $("#recentCam").textContent = kindList().length > 1 ? "· " + d.name : "";
+  // continue timelapse badge
+  $("#contBadge")?.remove();
+  if (d.continuous && !isLive) $("#view").insertAdjacentHTML("beforeend", `<div class="badge" id="contBadge" style="top:auto;bottom:12px"><span class="led on"></span>Continue timelapse</div>`);
   if (d.locked) {
     if (isLive) stopLive(true);
     $("#devContent").style.display = "none";
@@ -485,7 +511,7 @@ function showPicture(d) {
     badge.style.display = ""; badge.className = "badge"; $("#viewBadgeTxt").textContent = d.pictureAt ? ago(d.pictureAt) : "Laatste beeld";
   } else { img.style.display = "none"; empty.style.display = ""; badge.style.display = "none"; empty.innerHTML = "Nog geen beeld<br><br>Tik op Live bekijken"; }
 }
-function selectDevice(sn) { if (isLive) stopLive(); cur = sn; localStorage.setItem("dev", sn); settingsKey = ""; renderDevice(); loadRecent().catch(() => {}); }
+function selectDevice(sn) { if (isLive) stopLive(); cur = sn; kindCur[viewKind] = sn; localStorage.setItem(viewKind === "camera" ? "curCam" : "curDoor", sn); settingsKey = ""; renderDevice(); loadRecent().catch(() => {}); }
 async function unlockCam() {
   const d = dev(); if (!d) return;
   try {
@@ -699,7 +725,7 @@ function evRow(e) {
 function renderRecent() {
   const today = new Date().toDateString();
   $("#sToday").textContent = recent.filter((e) => new Date(e.time).toDateString() === today && e.kind === "ring").length;
-  $("#recent").innerHTML = recent.length ? recent.slice(0, 5).map(evRow).join("") : '<div class="pad muted">Nog niks gebeurd. Zodra iemand aanbelt zie je het hier.</div>';
+  $("#recent").innerHTML = recent.length ? recent.slice(0, 5).map(evRow).join("") : `<div class="pad muted">Nog niks gebeurd. Zodra ${viewKind === "camera" ? "er iets gebeurt" : "iemand aanbelt"} zie je het hier.</div>`;
 }
 function renderLog() { $("#log").innerHTML = logItems.length ? logItems.map(evRow).join("") : '<div class="pad muted">Geen gebeurtenissen</div>'; }
 async function loadRecent() { const d = dev(); if (!d || d.locked) { recent = []; return renderRecent(); } recent = (await api("/api/events?serial=" + d.serial)).events; renderRecent(); }
@@ -867,7 +893,10 @@ function tlDrawLine() {
     h += `<div class="hr" style="left:${x}%"></div>${x > 3 && x < 97 ? `<div class="hl" style="left:${x}%">${lbl}</div>` : ""}`;
   }
   if (tlDay === new Date().toLocaleDateString("sv-SE")) { const n = new Date(); const ns = n.getHours() * 3600 + n.getMinutes() * 60; if (ns >= tlRange[0] && ns <= tlRange[1]) h += `<div class="now" style="left:${pct(ns)}%" title="nu"></div>`; }
-  for (const f of tlList) { const x = pct(secOf(f.t)); if (x >= 0 && x <= 100) h += `<div class="fr ${f.event ? "ev" : ""}" style="left:${x}%"></div>`; }
+  // bij veel foto's (continue timelapse) samenvoegen tot ±400 streepjes
+  const marks = new Map();
+  for (const f of tlList) { const x = pct(secOf(f.t)); if (x < 0 || x > 100) continue; const k = Math.round(x * 4) / 4; marks.set(k, (marks.get(k) || false) || f.event); }
+  for (const [x, ev] of marks) h += `<div class="fr ${ev ? "ev" : ""}" style="left:${x}%"></div>`;
   h += `<div class="cur" id="tlCur"></div>`;
   $("#tlLine").innerHTML = h;
   tlMoveCursor();
@@ -1010,8 +1039,20 @@ function renderAppSettings() {
   const s = S.settings || {};
   const multi = S.devices.length > 1;
   $("#camSect").style.display = $("#camCard").style.display = "";
-  if (!$("#camCard").contains(document.activeElement)) $("#camCard").innerHTML = S.devices.map((d) => `<div class="set"><div style="flex:1;min-width:0"><div class="l">${d.locked ? "🔒 " : ""}Naam</div><div class="d">${esc(d.model || "")} · ${esc(d.serial)}</div></div>
-      <input type="text" value="${esc(d.name === d.serial ? "" : d.name)}" placeholder="bv. Voordeur" maxlength="40" style="max-width:52%" onchange="saveApp({names:{'${d.serial}':this.value}})"></div>`).join("")
+  const TL_OPTS = [[0, "Zoals hierboven"], [10, "Continu · elke 10 sec"], [30, "Continu · elke 30 sec"], [60, "Continu · elke minuut"], [120, "Continu · elke 2 min"], [300, "Elke 5 min"], [900, "Elke 15 min"], [1800, "Elke 30 min"], [3600, "Elk uur"], [-1, "Uit"]];
+  const est = (sec) => sec > 0 ? ` · ±${gb((86400 / sec) * 120000)} per dag` : "";
+  if (!$("#camCard").contains(document.activeElement)) $("#camCard").innerHTML = S.devices.map((d) => {
+    const c = d.cfg || {}, tl = c.tlSeconds ?? 0;
+    const eff = tl === -1 ? 0 : tl > 0 ? tl : (s.snapshotMinutes || 0) * 60;
+    const onBattery = d.battery != null && !d.charging;
+    return `<div class="set" style="display:block;padding-bottom:6px">
+      <div class="row" style="align-items:center"><div style="flex:1;min-width:0"><div class="l">${d.locked ? "🔒 " : ""}${esc(d.name)}${d.continuous ? ' <span class="tag" style="color:var(--ok)">● continu</span>' : ""}</div><div class="d">${esc(d.model || "")} · ${esc(d.serial)}</div></div></div>
+      <div class="row" style="align-items:center;margin-top:10px"><span class="muted" style="width:90px;flex:none">Naam</span><input type="text" value="${esc(d.name === d.serial ? "" : d.name)}" placeholder="bv. Voordeur" maxlength="40" style="max-width:none;flex:1" onchange="saveApp({names:{'${d.serial}':this.value}})"></div>
+      <div class="row" style="align-items:center;margin-top:8px"><span class="muted" style="width:90px;flex:none">Soort</span><select style="max-width:none;flex:1" onchange="saveApp({cams:{'${d.serial}':{kind:this.value}}})">${[["auto", `Automatisch (${d.isDoorbell === false ? "camera" : "deurbel"})`], ["doorbell", "Deurbel"], ["camera", "Camera"]].map(([v, l]) => `<option value="${v}" ${(c.kind || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="row" style="align-items:center;margin-top:8px"><span class="muted" style="width:90px;flex:none">Timelapse</span><select style="max-width:none;flex:1" onchange="saveApp({cams:{'${d.serial}':{tlSeconds:Number(this.value)}}})">${TL_OPTS.map(([v, l]) => `<option value="${v}" ${tl === v ? "selected" : ""}>${l}</option>`).join("")}${TL_OPTS.some(([v]) => v === tl) ? "" : `<option selected value="${tl}">Elke ${tl} sec</option>`}</select></div>
+      <div class="d" style="margin:6px 0 8px 98px">${eff ? (tl > 0 && tl <= 120 ? "De stream blijft open en er wordt continu een beeld bewaard." : "De camera wordt steeds even wakker gemaakt voor een foto.") + est(eff) : "Geen timelapse voor deze camera."}${tl > 0 && tl <= 120 && onBattery ? '<br><span style="color:var(--red)">Let op: deze camera lijkt op batterij te werken, continu kost veel batterij.</span>' : ""}</div>
+    </div>`;
+  }).join("")
     + (multi ? `<div class="set"><div><div class="l">Standaard camera</div><div class="d">Deze zie je als eerste als je de app opent</div></div>
     <select onchange="saveApp({defaultCamera:this.value})"><option value="">Laatst gekozen</option>${S.devices.map((d) => `<option value="${d.serial}" ${d.serial === s.defaultCamera ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>` : "")
     + `<div class="set"><button onclick="findCams(this)">🔍 Nieuwe camera's zoeken</button></div>`;
@@ -1020,7 +1061,7 @@ function renderAppSettings() {
   if (document.activeElement !== $("#keepDays")) $("#keepDays").value = s.keepDays ?? 0;
   $("#liveMax").value = String(s.liveMaxSeconds);
   if (![...$("#liveMax").options].some((o) => o.value === String(s.liveMaxSeconds))) $("#liveMax").insertAdjacentHTML("beforeend", `<option value="${s.liveMaxSeconds}" selected>${Math.round(s.liveMaxSeconds / 60)} min</option>`);
-  $("#snapCard").innerHTML = `<div class="set"><div><div class="l">Foto bijwerken</div><div class="d">Maakt de deurbel even wakker. Vaker = meer batterijverbruik. Slaat over als de batterij onder 15% is.</div></div>
+  $("#snapCard").innerHTML = `<div class="set"><div><div class="l">Foto bijwerken</div><div class="d">Standaard voor alle camera's (per camera aan te passen onder Camera's). Maakt de camera even wakker. Vaker = meer batterijverbruik. Slaat over als de batterij onder 15% is.</div></div>
       <select onchange="saveApp({snapshotMinutes:Number(this.value)})">${[[0, "Nooit"], [5, "Elke 5 min"], [15, "Elke 15 min"], [30, "Elke 30 min"], [60, "Elk uur"], [120, "Elke 2 uur"], [240, "Elke 4 uur"], [480, "Elke 8 uur"]].map(([v, l]) => `<option value="${v}" ${v === s.snapshotMinutes ? "selected" : ""}>${l}</option>`).join("")}${[0, 5, 15, 30, 60, 120, 240, 480].includes(s.snapshotMinutes) ? "" : `<option selected>${s.snapshotMinutes} min</option>`}</select></div>`
     + `<div class="set"><div><div class="l">Foto bij gebeurtenis</div><div class="d">Nieuwe foto bij aanbellen, persoon en pakket</div></div><label class="sw"><input type="checkbox" ${s.snapshotOnEvent !== false ? "checked" : ""} onchange="saveApp({snapshotOnEvent:this.checked})"><span></span></label></div>`
     + `<div class="set"><div><div class="l">Foto's van Eufy gebruiken</div><div class="d">Uit laten als de foto's strepen of grijze vlakken hebben</div></div><label class="sw"><input type="checkbox" ${s.useEufyPicture ? "checked" : ""} onchange="saveApp({useEufyPicture:this.checked})"><span></span></label></div>`
@@ -1161,7 +1202,8 @@ function reloadVisible() {
 async function start() {
   try { S = await api("/api/state"); } catch { return; }
   const def = S.settings?.defaultCamera;
-  if (def && S.devices.some((d) => d.serial === def)) cur = def;
+  const defDev = S.devices.find((d) => d.serial === def);
+  if (defDev) { cur = def; kindCur[defDev.isDoorbell === false ? "camera" : "doorbell"] = def; if (defDev.isDoorbell === false && !location.hash) location.hash = "#cam"; }
   renderStatus(); renderDevice();
   loadRecent().catch(() => {});
   connectStream();

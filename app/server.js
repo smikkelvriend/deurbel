@@ -93,6 +93,24 @@ const state = {
   devices: {},   // serial -> { serial, props, meta, picture, pictureAt, voices }
   stations: {},  // serial -> { serial, props, meta }
 };
+const DOORBELL_TYPES = new Set([5, 7, 16, 91, 93, 94, 95, 96]);
+const camCfg = (sn) => settings.cams?.[sn] || {};
+function isDoorbell(sn) {
+  const k = camCfg(sn).kind;
+  if (k === "doorbell") return true;
+  if (k === "camera") return false;
+  const p = state.devices[sn]?.props || {};
+  return DOORBELL_TYPES.has(Number(p.type)) || /^T82/.test(p.model || "");
+}
+// Timelapse-interval in seconden voor deze camera (0 = uit)
+function tlSeconds(sn) {
+  const c = camCfg(sn).tlSeconds;
+  if (c === -1) return 0;
+  if (c > 0) return c;
+  return (settings.snapshotMinutes || 0) * 60;
+}
+// Continu: de stream blijft open en er wordt elke N seconden een beeld uit gehaald (voor camera's op netstroom)
+const isContinuous = (sn) => { const c = camCfg(sn).tlSeconds; return c > 0 && c <= 120; };
 const displayName = (sn) => settings.names?.[sn] || state.devices[sn]?.props?.name || sn;
 const deviceAllowed = (sn) => !ENV.deviceSerial || ENV.deviceSerial === sn;
 
@@ -111,7 +129,7 @@ for (const r of recordings) {
 
 // ================= Server-Sent Events =================
 const sseClients = new Map(); // res -> req
-const lockedView = (d) => ({ serial: d.serial, name: d.name, model: d.model, locked: true, hasPin: true });
+const lockedView = (d) => ({ serial: d.serial, name: d.name, model: d.model, isDoorbell: d.isDoorbell, locked: true, hasPin: true });
 function filterFor(req, msg) {
   if (!Object.keys(sec.camPins).length) return msg;
   const L = (sn) => sn && camLocked(req, sn);
@@ -167,6 +185,9 @@ function publicDevice(d) {
     serial: d.serial,
     name: displayName(d.serial),
     eufyName: p.name || null,
+    isDoorbell: isDoorbell(d.serial),
+    cfg: camCfg(d.serial),
+    continuous: continuous.has(d.serial),
     model: p.model,
     type: p.type,
     battery: p.battery,
@@ -289,6 +310,7 @@ async function loadState(st) {
     try { s.props = unwrapProps(await send("station.get_properties", { serialNumber: sn })); } catch {}
     try { s.meta = unwrapProps(await send("station.get_properties_metadata", { serialNumber: sn })); } catch {}
   }
+  setTimeout(manageContinuous, 8000);
   if (!devs.length) log("Nog geen apparaten gevonden (inloggen nog bezig?)");
   else {
     setTimeout(() => syncRecordings().catch((e) => log("Opnames ophalen mislukt:", e.message)), 5000);
@@ -553,7 +575,11 @@ class LiveStream {
       await send("device.start_livestream", { serialNumber: this.serial }, 30000);
     } catch (e) { this.shutdown(e.message); return; }
     clearTimeout(this.timers.max);
-    this.timers.max = setTimeout(() => this.stop("maximale kijktijd bereikt"), settings.liveMaxSeconds * 1000);
+    const maxCheck = () => {
+      if ([...this.viewers].some((v) => v.cont || v.recorder)) { this.timers.max = setTimeout(maxCheck, 60000); return; } // continue timelapse / opname loopt nog
+      this.stop("maximale kijktijd bereikt");
+    };
+    this.timers.max = setTimeout(maxCheck, settings.liveMaxSeconds * 1000);
   }
   video(buffer, meta) {
     if (this.status === "idle") return;
@@ -585,12 +611,23 @@ class LiveStream {
   }
   spawnFor(v, waitAudioMs) {
     if (v.ff || v.pendingSpawn) return;
-    if (v.snapshot) return this.spawnNow(v);
+    if (v.snapshot || v.cont) return this.spawnNow(v);
     if (this.audioSeen || !waitAudioMs) return this.spawnNow(v);
     v.pendingSpawn = setTimeout(() => { v.pendingSpawn = null; this.spawnNow(v); }, waitAudioMs);
   }
   spawnNow(v) {
     if (v.ff || !this.viewers.has(v)) return;
+    if (v.cont) {
+      // continu: elke N seconden één beeld uit de lopende stream
+      const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-use_wallclock_as_timestamps", "1", "-f", this.codec, "-i", "pipe:0",
+        "-vf", `fps=1/${v.sec},scale='min(1600,iw)':-2`, "-q:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
+      v.ff = ff;
+      ff.stdin.on("error", () => {}); ff.stdout.on("error", () => {}); ff.stderr.on("error", () => {});
+      ff.stdout.on("data", (d) => v.res.write(d));
+      ff.on("close", () => { if (v.ff === ff) { v.ff = null; v.res.end(); } });
+      for (const c of this.gop) ff.stdin.write(c);
+      return;
+    }
     if (v.snapshot) {
       // één scherp beeld, ruim een seconde na het keyframe (dan is de belichting goed)
       const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", this.codec, "-i", "pipe:0",
@@ -678,17 +715,86 @@ function grabSnapshot(serial, reason, forEvent = false) {
   snapInflight.set(serial, p);
   return p;
 }
-// elke X minuten een nieuwe foto (instelbaar)
+// elke X minuten een nieuwe foto (instelbaar, per camera)
 setInterval(() => {
-  const min = settings.snapshotMinutes;
-  if (!min || !state.eufyConnected) return;
+  if (!state.eufyConnected) return;
   for (const d of Object.values(state.devices)) {
-    if (Date.now() - (d.pictureAt || 0) < min * 60000 - 30000) continue;
+    const sec = tlSeconds(d.serial);
+    if (!sec || isContinuous(d.serial)) continue;
+    if (Date.now() - (d.pictureAt || 0) < sec * 1000 - 20000) continue;
     if (recorders.has(d.serial) || (live.get(d.serial) && live.get(d.serial).status !== "idle")) continue;
-    if (d.props.battery != null && d.props.battery < 15) continue; // batterij sparen
-    grabSnapshot(d.serial, `elke ${min} min`);
+    if (d.props.battery != null && d.props.battery < 15 && !d.props.chargingStatus) continue; // batterij sparen
+    grabSnapshot(d.serial, sec >= 3600 ? `elke ${sec / 3600} uur` : `elke ${Math.round(sec / 60)} min`);
   }
-}, 60000);
+}, 30000);
+
+// ---- continue timelapse ----
+const continuous = new Map(); // serial -> { v, restartTimer }
+function startContinuous(serial) {
+  if (continuous.has(serial)) return;
+  const d = state.devices[serial];
+  if (!d) return;
+  const sec = tlSeconds(serial);
+  let buf = Buffer.alloc(0);
+  const c = { sec };
+  const v = {
+    cont: true, sec, ff: null,
+    res: {
+      writableLength: 0,
+      write: (chunk) => {
+        buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
+        for (;;) {
+          const a = buf.indexOf(Buffer.from([0xff, 0xd8]));
+          if (a < 0) { buf = Buffer.alloc(0); return; }
+          const b = buf.indexOf(Buffer.from([0xff, 0xd9]), a + 2);
+          if (b < 0) { if (a > 0) buf = buf.subarray(a); return; }
+          const jpg = Buffer.from(buf.subarray(a, b + 2));
+          buf = buf.subarray(b + 2);
+          storePictureBuf(d, jpg, false);
+          saveTimelapse(serial, jpg, null);
+          broadcastDevice(serial);
+        }
+      },
+      end: () => {
+        if (continuous.get(serial) !== c) return;
+        continuous.delete(serial);
+        log("Continue timelapse onderbroken:", displayName(serial), "- over 20 s opnieuw");
+        broadcastDevice(serial);
+        setTimeout(manageContinuous, 20000);
+      },
+    },
+  };
+  c.v = v;
+  continuous.set(serial, c);
+  log(`Continue timelapse gestart: ${displayName(serial)} (elke ${sec} s)`);
+  const l = getLive(serial);
+  l.viewers.add(v);
+  clearTimeout(l.timers.idle);
+  if (l.status === "idle") l.start().catch(() => {});
+  else if (l.status === "running" && l.codec) l.spawnNow(v);
+  broadcastDevice(serial);
+}
+function stopContinuous(serial) {
+  const c = continuous.get(serial);
+  if (!c) return;
+  continuous.delete(serial);
+  const l = live.get(serial);
+  if (l && l.viewers.has(c.v)) l.removeViewer(c.v);
+  log("Continue timelapse gestopt:", displayName(serial));
+  broadcastDevice(serial);
+}
+function manageContinuous() {
+  if (!state.eufyConnected) return;
+  for (const d of Object.values(state.devices)) {
+    const want = isContinuous(d.serial) && settings.timelapse !== false;
+    const c = continuous.get(d.serial);
+    if (want && c && c.sec !== tlSeconds(d.serial)) { stopContinuous(d.serial); startContinuous(d.serial); }
+    else if (want && !c) startContinuous(d.serial);
+    else if (!want && c) stopContinuous(d.serial);
+  }
+  for (const sn of continuous.keys()) if (!state.devices[sn]) stopContinuous(sn);
+}
+setInterval(manageContinuous, 60000);
 
 // ================= Zelf opnemen =================
 // Eufy geeft opgeslagen clips van een HomeBase 2 niet (meer) vrij aan andere programma's.
@@ -1415,6 +1521,17 @@ async function api(req, res, url) {
     if (b.snapshotMinutes != null && isFinite(b.snapshotMinutes)) settings.snapshotMinutes = num(b.snapshotMinutes, 0, 1440);
     if (b.timelapseDays != null && isFinite(b.timelapseDays)) settings.timelapseDays = num(b.timelapseDays, 0, 3650);
     if (typeof b.defaultCamera === "string") settings.defaultCamera = b.defaultCamera;
+    if (b.cams && typeof b.cams === "object") {
+      settings.cams = settings.cams || {};
+      for (const [sn, c] of Object.entries(b.cams)) {
+        const cur = settings.cams[sn] || {};
+        if (["auto", "doorbell", "camera"].includes(c.kind)) cur.kind = c.kind;
+        if (c.tlSeconds != null && isFinite(c.tlSeconds)) cur.tlSeconds = Math.max(-1, Math.min(86400, Number(c.tlSeconds)));
+        settings.cams[sn] = cur;
+      }
+      setTimeout(manageContinuous, 500);
+      for (const d of Object.values(state.devices)) broadcastDevice(d.serial);
+    }
     if (b.names && typeof b.names === "object") {
       settings.names = settings.names || {};
       for (const [sn, n] of Object.entries(b.names)) { const v = String(n || "").trim().slice(0, 40); if (v) settings.names[sn] = v; else delete settings.names[sn]; }
@@ -1447,7 +1564,12 @@ async function api(req, res, url) {
     const buf = await grabSnapshot(m[1], "handmatig");
     return buf ? json(res, 200, { ok: true }) : json(res, 500, { error: "Deurbel gaf geen beeld" });
   }
-  if ((m = p.match(/^\/api\/device\/(\w+)\/live\/stop$/)) && post) { await live.get(m[1])?.stop("handmatig gestopt"); return json(res, 200, { ok: true }); }
+  if ((m = p.match(/^\/api\/device\/(\w+)\/live\/stop$/)) && post) {
+    const l = live.get(m[1]);
+    // loopt er een continue timelapse of opname mee, dan de stream laten lopen
+    if (l && ![...l.viewers].some((v) => v.cont || v.recorder)) await l.stop("handmatig gestopt");
+    return json(res, 200, { ok: true });
+  }
   if ((m = p.match(/^\/api\/device\/(\w+)\/talk$/)) && post) {
     const t = getTalk(m[1]);
     const buf = await readRaw(req, 2e6);
