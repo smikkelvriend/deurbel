@@ -988,11 +988,11 @@ async function updAction(a) {
 
 // ---------- app-instellingen ----------
 async function loadAppSettings() {
+  loadUpdate(); loadSecurity(); // tegelijk ophalen, niet op elkaar wachten
   const j = await api("/api/settings").catch(() => null);
-  if (!j) { loadUpdate(); loadSecurity(); return; }
+  if (!j) return;
   S.settings = j.settings; storage = j.storage;
   renderAppSettings(); renderStorage();
-  loadUpdate(); loadSecurity();
 }
 function renderAppSettings() {
   const s = S.settings || {};

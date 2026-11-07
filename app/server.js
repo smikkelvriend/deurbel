@@ -102,6 +102,12 @@ let recordings = readJson(path.join(ENV.dataDir, "recordings.json"), []);
 const saveRecordings = () => writeJson(path.join(ENV.dataDir, "recordings.json"), recordings);
 for (const r of recordings) if (r.status === "downloading") r.status = r.file ? "done" : "remote";
 recordings = recordings.filter((r) => r.status !== "recording"); // half afgemaakte opnames van voor een herstart
+// omzetten onderbroken door een herstart? origineel terugzetten
+for (const r of recordings) {
+  if (!r.file) continue;
+  const f = path.join(REC_DIR, r.file);
+  try { if (fs.existsSync(f + ".orig")) { if (fs.existsSync(f)) fs.rmSync(f + ".orig"); else fs.renameSync(f + ".orig", f); } fs.rmSync(f + ".tmp.mp4", { force: true }); } catch {}
+}
 
 // ================= Server-Sent Events =================
 const sseClients = new Map(); // res -> req
@@ -713,7 +719,7 @@ async function pumpFf() {
   if (ffBusy || !ffQueue.length) return;
   ffBusy = true;
   const { input, out, resolve } = ffQueue.shift();
-  let ok = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts", "-i", input,
+  let ok = await runNice("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts", "-i", input,
     "-map", "0:v:0", "-map", "0:a:0?", "-vf", "scale='min(1600,iw)':-2,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", "-crf", "25",
     "-profile:v", "main", "-level", "4.1", "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", out + ".tmp.mp4"]);
   if (!ok) ok = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", input, "-c", "copy", "-movflags", "+faststart", out + ".tmp.mp4"]);
@@ -974,6 +980,8 @@ const downloader = {
     this.fail(reason);
   },
 };
+// Zware klussen (omzetten) met lage prioriteit, zodat de rest van de server (en je Minecraft-server) er geen last van heeft
+function runNice(cmd, args) { return run("nice", ["-n", "15", cmd, ...args]); }
 function run(cmd, args) {
   return new Promise((resolve) => {
     const p = spawn(cmd, args);
@@ -1030,7 +1038,7 @@ async function tlVideo(serial, day, fps) {
   if (frames.length < 2) throw new Error("Te weinig foto's voor een video");
   const list = path.join(TMP_DIR, `tl-${serial}-${day}.txt`);
   fs.writeFileSync(list, frames.map((x) => `file '${path.join(dir, x.f)}'\nduration ${1 / (fps || 8)}`).join("\n") + `\nfile '${path.join(dir, frames[frames.length - 1].f)}'\n`);
-  const ok = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", list,
+  const ok = await runNice("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", list,
     "-vf", "scale='min(1600,iw)':-2:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", "-r", "25", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-movflags", "+faststart", out]);
   fs.rm(list, () => {});
   if (!ok) throw new Error("Video maken mislukt");
@@ -1061,7 +1069,13 @@ async function dirSize(dir) {
 }
 let storageCache = null, storageCacheAt = 0;
 async function storageInfo(fresh) {
-  if (!fresh && storageCache && Date.now() - storageCacheAt < 60000) return { ...storageCache, limit: settings.storageGb * 1e9, count: recordings.filter((r) => r.file).length };
+  if (!fresh && storageCache) {
+    if (Date.now() - storageCacheAt > 60000 && !storageInfo.busy) { // op de achtergrond bijwerken
+      storageInfo.busy = true;
+      storageInfoReal().then((x) => { storageCache = x; storageCacheAt = Date.now(); }).finally(() => (storageInfo.busy = false));
+    }
+    return { ...storageCache, limit: settings.storageGb * 1e9, count: recordings.filter((r) => r.file).length };
+  }
   storageCache = await storageInfoReal(); storageCacheAt = Date.now();
   return storageCache;
 }
@@ -1470,6 +1484,7 @@ server.listen(ENV.port, () => {
   if (!ENV.ntfyTopic) log("Meldingen staan uit (NTFY_TOPIC leeg)");
   connectEufy();
   enforceStorage().catch(() => {});
+  storageInfo(true).catch(() => {});
 });
 // Nooit de hele server laten crashen door één kapotte pijp of verbinding
 process.on("uncaughtException", (e) => log("Onverwachte fout (genegeerd):", e && e.message));
