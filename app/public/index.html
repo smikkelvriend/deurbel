@@ -932,6 +932,18 @@ async function tlDelete() {
   tlDay = null; toast("Gewist"); loadTlDays();
 }
 
+async function findCams(btn) {
+  btn.disabled = true; btn.textContent = "Zoeken bij Eufy…";
+  try {
+    const j = await api("/api/devices/refresh", { method: "POST" });
+    if (j.added.length) toast("Gevonden: " + j.added.join(", "));
+    else if (j.filtered) toast("DEVICE_SERIAL in .env laat maar één camera zien, maak die leeg");
+    else toast(`Geen nieuwe camera's (${j.count} totaal)`);
+    S = await api("/api/state"); renderDevice(); renderAppSettings();
+  } catch (e) { toast(e.message); }
+  btn.disabled = false; btn.textContent = "🔍 Nieuwe camera's zoeken";
+}
+
 // ---------- beveiliging ----------
 async function loadSecurity() {
   const j = await api("/api/security").catch(() => null);
@@ -997,11 +1009,12 @@ async function loadAppSettings() {
 function renderAppSettings() {
   const s = S.settings || {};
   const multi = S.devices.length > 1;
-  $("#camSect").style.display = $("#camCard").style.display = S.devices.length ? "" : "none";
+  $("#camSect").style.display = $("#camCard").style.display = "";
   if (!$("#camCard").contains(document.activeElement)) $("#camCard").innerHTML = S.devices.map((d) => `<div class="set"><div style="flex:1;min-width:0"><div class="l">${d.locked ? "🔒 " : ""}Naam</div><div class="d">${esc(d.model || "")} · ${esc(d.serial)}</div></div>
       <input type="text" value="${esc(d.name === d.serial ? "" : d.name)}" placeholder="bv. Voordeur" maxlength="40" style="max-width:52%" onchange="saveApp({names:{'${d.serial}':this.value}})"></div>`).join("")
     + (multi ? `<div class="set"><div><div class="l">Standaard camera</div><div class="d">Deze zie je als eerste als je de app opent</div></div>
-    <select onchange="saveApp({defaultCamera:this.value})"><option value="">Laatst gekozen</option>${S.devices.map((d) => `<option value="${d.serial}" ${d.serial === s.defaultCamera ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>` : "");
+    <select onchange="saveApp({defaultCamera:this.value})"><option value="">Laatst gekozen</option>${S.devices.map((d) => `<option value="${d.serial}" ${d.serial === s.defaultCamera ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>` : "")
+    + `<div class="set"><button onclick="findCams(this)">🔍 Nieuwe camera's zoeken</button></div>`;
   if (document.activeElement !== $("#gbNum")) { $("#gbNum").value = s.storageGb; $("#gbRange").value = Math.min(500, s.storageGb); }
   $("#autoSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === s.autoDownload));
   if (document.activeElement !== $("#keepDays")) $("#keepDays").value = s.keepDays ?? 0;

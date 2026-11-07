@@ -250,10 +250,29 @@ function connectEufy() {
 }
 function scheduleReconnect() { setTimeout(connectEufy, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 30000); }
 
+// Apparatenlijst opnieuw ophalen (nieuwe of verwijderde camera's)
+let reloadTimer = null;
+function scheduleReload(ms = 3000) {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(async () => {
+    try {
+      const before = Object.keys(state.devices).length;
+      const r = await send("start_listening", {}, 60000);
+      await loadState(r.state || {});
+      const after = Object.keys(state.devices).length;
+      if (after !== before) log(`Apparaten: ${before} → ${after}`);
+      broadcast(publicState());
+    } catch (e) { log("Apparatenlijst vernieuwen mislukt:", e.message); }
+  }, ms);
+}
+// elk half uur kijken of er camera's bij zijn gekomen
+setInterval(() => { if (state.eufyConnected) send("driver.poll_refresh", {}, 60000).then(() => scheduleReload(5000)).catch(() => {}); }, 30 * 60000);
+
 async function loadState(st) {
   state.cloudConnected = !!(st.driver && st.driver.connected);
   const devs = (st.devices || []).map((d) => (typeof d === "string" ? d : d.serialNumber)).filter(Boolean);
   const stations = new Set((st.stations || []).map((s) => (typeof s === "string" ? s : s.serialNumber)).filter(Boolean));
+  if (devs.length) for (const sn of Object.keys(state.devices)) if (!devs.includes(sn)) { log("Apparaat verdwenen:", displayName(sn)); delete state.devices[sn]; }
   for (const serial of devs) {
     if (!deviceAllowed(serial)) continue;
     const d = state.devices[serial] || (state.devices[serial] = { serial, props: {}, meta: {}, voices: [] });
@@ -308,6 +327,10 @@ function handleMessage(msg) {
   if (msg.type !== "event" || !msg.event) return;
   const e = msg.event;
   if (e.source === "driver") return handleDriverEvent(e);
+  if (["device added", "device removed", "station added", "station removed"].includes(e.event)) {
+    log(`Eufy meldt: ${e.event} (${e.serialNumber || e.device?.serialNumber || "?"})`);
+    return scheduleReload();
+  }
   if (e.source === "station") return handleStationEvent(e);
   if (e.source !== "device" || !e.serialNumber || !deviceAllowed(e.serialNumber)) return;
   const d = state.devices[e.serialNumber];
@@ -1350,6 +1373,17 @@ async function api(req, res, url) {
     const b = await readBody(req);
     fs.writeFileSync(path.join(ENV.dataDir, "update-now"), b.action === "install" ? "install" : "check");
     return json(res, 200, { ok: true });
+  }
+
+  // --- nieuwe camera's zoeken ---
+  if (p === "/api/devices/refresh" && post) {
+    await send("driver.poll_refresh", {}, 60000).catch((e) => log("poll_refresh:", e.message));
+    const before = Object.keys(state.devices);
+    const r = await send("start_listening", {}, 60000);
+    await loadState(r.state || {});
+    broadcast(publicState());
+    const added = Object.keys(state.devices).filter((x) => !before.includes(x));
+    return json(res, 200, { ok: true, count: Object.keys(state.devices).length, added: added.map(displayName), filtered: !!ENV.deviceSerial });
   }
 
   // --- timelapse ---
