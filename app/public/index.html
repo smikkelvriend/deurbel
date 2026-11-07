@@ -120,6 +120,7 @@
   .ctlrow { display: flex; gap: 8px; align-items: center; }
   .ctlrow .ib { background: var(--card2); width: 46px; height: 46px; }
   details.grp { margin-bottom: 10px; }
+  body.member .admin-only { display: none !important; }
   details.grp > summary { list-style: none; display: flex; align-items: center; gap: 14px; padding: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; cursor: pointer; }
   details.grp > summary::-webkit-details-marker { display: none; }
   details.grp > summary::after { content: "›"; margin-left: auto; color: var(--dim); font-size: 22px; transition: transform .2s; }
@@ -128,6 +129,15 @@
   details.grp .gi { width: 38px; height: 38px; border-radius: 12px; background: var(--card2); display: flex; align-items: center; justify-content: center; font-size: 17px; flex: none; }
   details.grp b { display: block; font-size: 15px; }
   details.grp i { display: block; font-style: normal; font-size: 11px; color: var(--dim); margin-top: 3px; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding: 0 2px; }
+  .bars .b { flex: 1; display: flex; flex-direction: column-reverse; min-width: 0; border-radius: 4px 4px 0 0; overflow: hidden; background: var(--card2); }
+  .bars .b i { display: block; }
+  .xl { display: flex; gap: 3px; margin-top: 6px; font-size: 9px; color: var(--dim); }
+  .xl span { flex: 1; text-align: center; min-width: 0; overflow: hidden; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--dim); margin-top: 10px; }
+  .legend b { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .hbar { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 12px; }
+  .hbar .t { height: 10px; background: var(--fg); border-radius: 99px; }
   .dayhead { padding: 12px 14px 6px; font-size: 11px; color: var(--dim); letter-spacing: 1.5px; text-transform: uppercase; border-bottom: 1px solid var(--line); }
   details.adv summary { padding: 14px 16px; cursor: pointer; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; list-style: none; }
   details.adv[open] summary { border-bottom: 1px solid var(--line); }
@@ -182,7 +192,7 @@
       <div class="stat"><div class="k" id="sTodayK">Aangebeld</div><div class="v" id="sToday">0</div></div>
     </div>
 
-    <div id="modeCard"></div>
+    <div id="modeCard" class="admin-only"></div>
 
     <div class="sect"><span>Laatste gebeurtenissen <span id="recentCam" style="color:var(--fg)"></span></span><a href="#log" class="muted" style="text-decoration:none">Alles ›</a></div>
     <div class="card" id="recent"></div>
@@ -211,7 +221,7 @@
             <button class="ib" onclick="tlStep(1)">⏭</button>
             <select id="tlSpeed" style="flex:none" onchange="if(tlTimer){tlToggle();tlToggle();}"><option value="2">2×/s</option><option value="5">5×/s</option><option value="10" selected>10×/s</option><option value="20">20×/s</option></select>
           </div>
-          <div class="row"><button onclick="tlVideo()">🎬 Als video</button><button onclick="tlDownload()">⬇ Download</button><button onclick="tlDelete()">Wis dag</button></div>
+          <div class="row"><button onclick="tlVideo()">🎬 Als video</button><button onclick="tlDownload()">⬇ Download</button><button class="admin-only" onclick="tlDelete()">Wis dag</button></div>
           <div class="muted" id="tlInfo"></div>
         </div>
       </div>
@@ -234,6 +244,12 @@
   <!-- ================= LOG ================= -->
   <section class="page" id="p-log">
     <select id="logCam" class="devsel camsel" style="display:none"></select>
+    <div class="seg" id="logMode" style="margin-bottom:12px"><button class="on" data-v="list">Lijst</button><button data-v="stats">Overzicht</button></div>
+    <div id="statsSection" style="display:none">
+      <div class="seg" id="statDays" style="margin-bottom:12px"><button data-v="7" class="on">7 dagen</button><button data-v="30">30 dagen</button><button data-v="90">3 maanden</button></div>
+      <div id="statsBody"><div class="card pad muted">Laden…</div></div>
+    </div>
+    <div id="logSection">
     <div class="chips" id="chips">
       <button class="chip on" data-k="">Alles</button>
       <button class="chip" data-k="ring">Aanbellen</button>
@@ -244,19 +260,22 @@
     <div class="sect" id="logTitle">Alle gebeurtenissen</div>
     <div class="card" id="log"></div>
     <button id="moreBtn" onclick="loadMore()" style="width:100%;display:none">Meer laden</button>
+    </div>
   </section>
 
   <!-- ================= INSTELLINGEN ================= -->
   <section class="page" id="p-set">
-    <details class="grp" data-g="cams"><summary><span class="gi">◎</span><span><b>Camera's</b><i>Namen, deurbel of camera, timelapse per camera</i></span></summary>
+    <details class="grp admin-only" data-g="cams"><summary><span class="gi">◎</span><span><b>Camera's</b><i>Namen, deurbel of camera, timelapse per camera</i></span></summary>
       <div class="card" id="camCard"></div>
     </details>
 
-    <details class="grp" data-g="notif"><summary><span class="gi">🔔</span><span><b>Meldingen</b><i>Wanneer je telefoon een melding krijgt</i></span></summary>
+    <details class="grp admin-only" data-g="notif"><summary><span class="gi">🔔</span><span><b>Meldingen</b><i>Wanneer je telefoon een melding krijgt</i></span></summary>
       <div class="card" id="notifCard"></div>
+      <div class="sect">Slim</div>
+      <div class="card" id="smartCard"></div>
     </details>
 
-    <details class="grp" data-g="rec"><summary><span class="gi">⏺</span><span><b>Opnemen en live</b><i>Wanneer en hoe lang er wordt opgenomen</i></span></summary>
+    <details class="grp admin-only" data-g="rec"><summary><span class="gi">⏺</span><span><b>Opnemen en live</b><i>Wanneer en hoe lang er wordt opgenomen</i></span></summary>
       <div class="card" id="recCard"></div>
       <div class="card">
         <div class="set"><div><div class="l">Live beeld stopt na</div><div class="d">Spaart de batterij van de deurbel</div></div>
@@ -266,11 +285,11 @@
       </div>
     </details>
 
-    <details class="grp" data-g="snap"><summary><span class="gi">🕐</span><span><b>Foto's en timelapse</b><i>Hoe vaak er een foto wordt gemaakt</i></span></summary>
+    <details class="grp admin-only" data-g="snap"><summary><span class="gi">🕐</span><span><b>Foto's en timelapse</b><i>Hoe vaak er een foto wordt gemaakt</i></span></summary>
       <div class="card" id="snapCard"></div>
     </details>
 
-    <details class="grp" data-g="store"><summary><span class="gi">💾</span><span><b>Opslag</b><i id="storeSum">Hoeveel ruimte de app mag gebruiken</i></span></summary>
+    <details class="grp admin-only" data-g="store"><summary><span class="gi">💾</span><span><b>Opslag</b><i id="storeSum">Hoeveel ruimte de app mag gebruiken</i></span></summary>
       <div class="card">
         <div class="set" style="display:block">
           <div class="l">Maximale opslag</div>
@@ -294,7 +313,7 @@
       </div>
     </details>
 
-    <details class="grp" data-g="dev"><summary><span class="gi">⚙</span><span><b>Camera-instellingen</b><i id="devSum">Detectie, nachtzicht, volume…</i></span></summary>
+    <details class="grp admin-only" data-g="dev"><summary><span class="gi">⚙</span><span><b>Camera-instellingen</b><i id="devSum">Detectie, nachtzicht, volume…</i></span></summary>
       <select id="setCam" class="devsel" style="display:none" onchange="pickSetCam(this.value)"></select>
       <div class="card" id="settings"><div class="set"><div class="l muted">Laden…</div></div></div>
       <div class="sect" id="stTitle" style="display:none">Basisstation</div>
@@ -304,11 +323,11 @@
       <div class="row" style="margin-bottom:14px"><button onclick="refreshDevice()">Vernieuwen</button><button onclick="rebootStation()">Herstarten</button></div>
     </details>
 
-    <details class="grp" data-g="sec"><summary><span class="gi">🔒</span><span><b>Beveiliging</b><i>Pincode van de app en per camera</i></span></summary>
+    <details class="grp" data-g="sec"><summary><span class="gi">🔒</span><span><b>Huisgenoten en pincodes</b><i>Wie mag wat zien</i></span></summary>
       <div class="card" id="secCard"><div class="set"><div class="l muted">Laden…</div></div></div>
     </details>
 
-    <details class="grp" data-g="upd"><summary><span class="gi">⬆</span><span><b>Updates</b><i id="updSum">Automatisch via GitHub</i></span></summary>
+    <details class="grp admin-only" data-g="upd"><summary><span class="gi">⬆</span><span><b>Updates</b><i id="updSum">Automatisch via GitHub</i></span></summary>
       <div class="card" id="updCard"><div class="set"><div class="l muted">Laden…</div></div></div>
     </details>
     <div class="muted" style="text-align:center;margin:18px 0 6px">Deurbel · eigen app voor je Eufy-camera's</div>
@@ -456,6 +475,7 @@ function route() {
 
 // ---------- status ----------
 function renderStatus() {
+  document.body.classList.toggle("member", S.me && S.me.role !== "admin");
   const led = $("#led"), t = $("#statusTxt");
   led.className = "led";
   if (!S.eufyConnected) { led.classList.add("bad"); t.textContent = "Server offline"; }
@@ -562,7 +582,7 @@ function renderCamSelects() {
 }
 for (const id of ["#logCam", "#recCam"]) $(id).addEventListener("change", (e) => {
   camF = e.target.value; localStorage.setItem("camF", camF); renderCamSelects();
-  logItems = []; if ($("#p-log").classList.contains("on")) loadLog();
+  logItems = []; if ($("#p-log").classList.contains("on")) { loadLog(); if ($("#statsSection").style.display !== "none") loadStats(); }
   if ($("#p-rec").classList.contains("on")) { loadRec(); if ($("#tlSection").style.display !== "none") { tlDay = null; loadTlDays(); } }
 });
 const camQ = () => (camF ? "&serial=" + camF : "");
@@ -792,7 +812,7 @@ function openEvent(id) {
     <div class="row" style="margin-top:16px;flex-wrap:wrap">
       <button onclick="findRecording(${e.time})">▶ Opname</button>
       ${e.snapshot ? `<button onclick="saveFile('/api/snapshot/${e.snapshot}','deurbel-${e.snapshot}')">Opslaan</button>` : ""}
-      <button onclick="delEvent('${e.id}')">Wissen</button>
+      <button class="admin-only" onclick="delEvent('${e.id}')">Wissen</button>
     </div>`);
 }
 async function findRecording(t) {
@@ -863,8 +883,8 @@ function openRec(id) {
     <div class="muted">${when(r.start)}${r.duration ? " · " + dur(r.duration) : ""}${r.size ? " · " + gb(r.size) : ""} · ${esc(devName(r.serial, r.device))}</div>
     <div class="row" style="margin-top:16px;flex-wrap:wrap">
       ${r.status === "done" ? `<button onclick="saveFile('/api/recordings/${r.id}.mp4','deurbel-${r.id}.mp4')">⬇ Opslaan</button>
-        <button onclick="keepRec('${r.id}')">${r.keep ? "☆ Niet bewaren" : "★ Bewaren"}</button>
-        <button onclick="delRec('${r.id}')">Wissen</button>` : r.status === "remote" ? `<button class="primary" onclick="dlRec('${r.id}')">⬇ Naar server halen</button>` : ""}
+        <button class="admin-only" onclick="keepRec('${r.id}')">${r.keep ? "☆ Niet bewaren" : "★ Bewaren"}</button>
+        <button class="admin-only" onclick="delRec('${r.id}')">Wissen</button>` : r.status === "remote" ? `<button class="primary" onclick="dlRec('${r.id}')">⬇ Naar server halen</button>` : ""}
     </div>${r.status === "done" ? '<div class="muted" style="margin-top:10px">★ Bewaren = wordt nooit automatisch verwijderd als de opslag vol raakt.</div>' : ""}`);
   $("#modal").dataset.rec = id;
 }
@@ -876,6 +896,49 @@ function updateRec(r) {
   if (i >= 0) { recItems[i] = r; renderRec(); }
   else if ($("#p-rec").classList.contains("on")) loadRec();
   if ($("#modal").classList.contains("on") && $("#modal").dataset.rec === r.id && !$("#modalBox video")) openRec(r.id);
+}
+
+// ---------- overzicht ----------
+const KCOL = { ring: "var(--red)", person: "#fff", package: "#f5c542", motion: "#555" };
+let statDays = 7;
+$("#logMode").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  $("#logMode").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+  const st = b.dataset.v === "stats";
+  $("#statsSection").style.display = st ? "" : "none"; $("#logSection").style.display = st ? "none" : "";
+  if (st) loadStats();
+});
+$("#statDays").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  $("#statDays").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+  statDays = Number(b.dataset.v); loadStats();
+});
+async function loadStats() {
+  const j = await api(`/api/stats?days=${statDays}${camF ? "&serial=" + camF : ""}`).catch((e) => ({ error: e.message }));
+  if (j.error) { $("#statsBody").innerHTML = `<div class="card pad muted">${esc(j.error)}</div>`; return; }
+  const max = Math.max(1, ...j.byDay.map((d) => d.ring + d.person + d.motion + d.package));
+  const every = Math.ceil(j.byDay.length / 10);
+  const dayBars = j.byDay.map((d) => `<div class="b" style="height:100%" title="${d.day}: ${d.ring + d.person + d.motion + d.package}">${["ring", "person", "package", "motion"].map((k) => d[k] ? `<i style="height:${(d[k] / max) * 100}%;background:${KCOL[k]}"></i>` : "").join("")}<i style="flex:1;background:transparent"></i></div>`).join("");
+  const dayLbl = j.byDay.map((d, i) => `<span>${i % every === 0 ? (j.byDay.length <= 7 ? new Date(d.day + "T12:00").toLocaleDateString("nl-NL", { weekday: "short" }) : Number(d.day.slice(8)) + "/" + Number(d.day.slice(5, 7))) : ""}</span>`).join("");
+  const hmax = Math.max(1, ...j.byHour.map((h) => h.all));
+  const hourBars = j.byHour.map((h, i) => `<div class="b" style="height:100%" title="${i}:00 · ${h.all}"><i style="height:${(h.ring / hmax) * 100}%;background:${KCOL.ring}"></i><i style="height:${((h.all - h.ring) / hmax) * 100}%;background:#888"></i><i style="flex:1;background:transparent"></i></div>`).join("");
+  const hourLbl = j.byHour.map((_, i) => `<span>${i % 3 === 0 ? i : ""}</span>`).join("");
+  const WD = ["ma", "di", "wo", "do", "vr", "za", "zo"], wmax = Math.max(1, ...j.byWeekday);
+  const cams = Object.entries(j.perCam).sort((a, b) => b[1] - a[1]), cmax = Math.max(1, ...cams.map((c) => c[1]));
+  const tile = (k) => `<div class="stat"><div class="k">${KIND_IC[k]} ${KIND_NL[k]}</div><div class="v">${j.totals[k]}</div></div>`;
+  const bd = j.busiestDay.day ? new Date(j.busiestDay.day + "T12:00").toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" }) : "–";
+  $("#statsBody").innerHTML = `
+    <div class="stats" style="grid-template-columns:repeat(2,1fr);margin-bottom:14px">${["ring", "person", "package", "motion"].map(tile).join("")}</div>
+    <div class="card pad"><div class="l" style="margin-bottom:4px">Per dag</div><div class="d" style="margin-bottom:12px">${j.total} gebeurtenissen · gemiddeld ${(j.totals.ring / j.days).toFixed(1).replace(".", ",")}× aanbellen per dag</div>
+      <div class="bars">${dayBars}</div><div class="xl">${dayLbl}</div>
+      <div class="legend">${["ring", "person", "package", "motion"].map((k) => `<span><b style="background:${KCOL[k]}"></b>${KIND_NL[k]}</span>`).join("")}</div></div>
+    <div class="card pad"><div class="l" style="margin-bottom:4px">Drukste momenten van de dag</div><div class="d" style="margin-bottom:12px">${j.busiestHour.hour != null ? `Het drukst rond ${j.busiestHour.hour}:00 uur` : "Nog geen gegevens"}</div>
+      <div class="bars" style="height:100px">${hourBars}</div><div class="xl">${hourLbl}</div>
+      <div class="legend"><span><b style="background:var(--red)"></b>Aanbellen</span><span><b style="background:#888"></b>Overig</span></div></div>
+    <div class="card pad"><div class="l" style="margin-bottom:10px">Per dag van de week</div>
+      ${WD.map((w, i) => `<div class="hbar"><span style="width:22px;color:var(--dim)">${w}</span><div class="t" style="width:${(j.byWeekday[i] / wmax) * 80}%"></div><span class="muted">${j.byWeekday[i]}</span></div>`).join("")}
+      <div class="d" style="margin-top:8px">Drukste dag: ${bd}${j.busiestDay.total ? ` (${j.busiestDay.total})` : ""}</div></div>
+    ${cams.length > 1 ? `<div class="card pad"><div class="l" style="margin-bottom:10px">Per camera</div>${cams.map(([n, c]) => `<div class="hbar"><span style="width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n)}</span><div class="t" style="width:${(c / cmax) * 60}%"></div><span class="muted">${c}</span></div>`).join("")}</div>` : ""}`;
 }
 
 // ---------- timelapse ----------
@@ -1043,13 +1106,77 @@ function pickSetCam(sn) {
 async function loadSecurity() {
   const j = await api("/api/security").catch(() => null);
   if (!j) { $("#secCard").innerHTML = '<div class="set"><div class="d">Server niet bereikbaar (wordt hij bijgewerkt?). Opnieuw proberen…</div></div>'; setTimeout(() => { if ($("#p-set").classList.contains("on")) loadSecurity(); }, 4000); return; }
-  let h = `<div class="set"><div><div class="l">Pincode van de app</div><div class="d">${j.appPin ? "Staat aan" : "Uit: iedereen op je netwerk kan het dashboard openen"}</div></div><button class="small" onclick="openAppPin(${j.appPin})">${j.appPin ? "Wijzigen" : "Instellen"}</button></div>`;
-  for (const c of j.cameras) {
-    h += `<div class="set"><div><div class="l">${c.hasPin ? "🔒" : "🔓"} ${esc(c.name)}</div><div class="d">${c.hasPin ? (c.unlocked ? "Eigen pincode · nu ontgrendeld" : "Eigen pincode · vergrendeld") : "Geen eigen pincode"}</div></div>
-      <span style="display:flex;gap:6px">${c.hasPin && c.unlocked ? `<button class="small" onclick="lockCam('${c.serial}')">Vergrendel</button>` : ""}<button class="small" onclick="openCamPin('${c.serial}','${esc(c.name)}',${c.hasPin})">${c.hasPin ? "Wijzigen" : "Pincode"}</button></span></div>`;
+  SEC = j;
+  let h = "";
+  if (!j.hasPin) {
+    h += `<div class="set"><div><div class="l">Geen pincode</div><div class="d">Iedereen op je netwerk kan het dashboard openen. Stel een pincode in om huisgenoten toe te voegen.</div></div><button class="small" onclick="openFirstPin()">Instellen</button></div>`;
+  } else {
+    h += `<div class="set"><div><div class="l">Ingelogd als ${esc(j.me.name)}</div><div class="d">${j.me.role === "admin" ? "Beheerder" : "Huisgenoot"}</div></div><span style="display:flex;gap:6px"><button class="small" onclick="openAppPin()">Mijn pincode</button><button class="small" onclick="logout()">Uitloggen</button></span></div>`;
   }
-  h += `<div class="set"><div class="d">Een camera met eigen pincode is pas te zien (beeld, foto's, opnames, timelapse, log en instellingen) als je hem op dit toestel ontgrendelt. Meldingen op je telefoon gaan gewoon door.</div></div>`;
+  if (j.admin && j.hasPin) {
+    h += `<div class="set" style="display:block"><div class="l">Huisgenoten</div><div class="d">Iedereen logt in met een eigen pincode. Per persoon kies je welke camera's ze zien.</div>`;
+    for (const u of j.users) {
+      const cams = u.cams === "all" ? "Alle camera's" : (u.cams.map((sn) => j.allCameras.find((c) => c.serial === sn)?.name || sn).join(", ") || "Geen camera's");
+      h += `<div class="row" style="align-items:center;margin-top:12px"><div style="flex:1;min-width:0"><div style="font-size:14px">${esc(u.name)}${u.id === j.me.id ? ' <span class="tag">jij</span>' : ""}</div><div class="d">${u.role === "admin" ? "Beheerder" : "Huisgenoot"} · ${esc(cams)}</div></div>
+        <button class="small" onclick="openUser('${u.id}')">Wijzigen</button></div>`;
+    }
+    h += `<button style="width:100%;margin-top:14px" onclick="openUser()">+ Huisgenoot toevoegen</button></div>`;
+  }
+  if (j.admin) {
+    for (const c of j.cameras) {
+      h += `<div class="set"><div><div class="l">${c.hasPin ? "🔒" : "🔓"} ${esc(c.name)}</div><div class="d">${c.hasPin ? (c.unlocked ? "Extra pincode · nu ontgrendeld" : "Extra pincode · vergrendeld") : "Geen extra pincode"}</div></div>
+        <span style="display:flex;gap:6px">${c.hasPin && c.unlocked ? `<button class="small" onclick="lockCam('${c.serial}')">Vergrendel</button>` : ""}<button class="small" onclick="openCamPin('${c.serial}','${esc(c.name)}',${c.hasPin})">${c.hasPin ? "Wijzigen" : "Pincode"}</button></span></div>`;
+    }
+    h += `<div class="set"><div class="d">Een camera met een extra pincode moet je op elk toestel apart ontgrendelen, ook als je bent ingelogd.</div></div>`;
+  }
   $("#secCard").innerHTML = h;
+}
+let SEC = null;
+async function logout() { await api("/api/logout", { method: "POST" }).catch(() => {}); location.reload(); }
+function openFirstPin() {
+  modal(`<div style="font-weight:700;margin-bottom:4px">Pincode instellen</div><div class="muted">Jij wordt de beheerder. Daarna kun je huisgenoten toevoegen.</div>
+    <div class="muted" style="margin-top:12px">Je naam</div><input id="fpName" type="text" value="Floyd" style="width:100%;max-width:none;margin-top:4px">
+    <div class="muted" style="margin-top:12px">Pincode (4 tot 12 cijfers)</div><input id="fpPin" class="big" type="password" inputmode="numeric">
+    <div class="row"><button onclick="closeModal()">Annuleren</button><button class="primary" onclick="saveFirstPin()">Opslaan</button></div>`);
+}
+async function saveFirstPin() {
+  try { await api("/api/pin", { method: "POST", body: { name: $("#fpName").value, pin: $("#fpPin").value } }); closeModal(); toast("Pincode ingesteld"); loadSecurity(); } catch (e) { toast(e.message); }
+}
+function openUser(id) {
+  const u = id ? SEC.users.find((x) => x.id === id) : { name: "", role: "member", cams: "all", notify: true };
+  const all = u.cams === "all";
+  const ntfyLink = u.topic ? `${SEC.ntfyUrl}/${u.topic}` : "";
+  modal(`<div style="font-weight:700;margin-bottom:10px">${id ? "Huisgenoot wijzigen" : "Huisgenoot toevoegen"}</div>
+    <div class="muted">Naam</div><input id="uName" type="text" value="${esc(u.name)}" style="width:100%;max-width:none;margin:4px 0 12px">
+    <div class="muted">${id ? "Nieuwe pincode (leeg = niet wijzigen)" : "Pincode (4 tot 12 cijfers)"}</div><input id="uPin" class="big" type="password" inputmode="numeric" autocomplete="new-password" style="margin-top:4px">
+    ${id === SEC.me.id ? "" : `<div class="muted">Rol</div><div class="seg" id="uRole" style="margin:4px 0 12px"><button data-v="member" class="${u.role !== "admin" ? "on" : ""}">Huisgenoot</button><button data-v="admin" class="${u.role === "admin" ? "on" : ""}">Beheerder</button></div>`}
+    <div class="muted">Mag deze camera's zien</div>
+    <div id="uCams" style="display:grid;gap:6px;margin:6px 0 12px">
+      <label class="row" style="align-items:center"><input type="checkbox" id="uAll" ${all ? "checked" : ""} onchange="document.querySelectorAll('.uCam').forEach(x=>x.disabled=this.checked)"> Alle camera's (ook nieuwe)</label>
+      ${SEC.allCameras.map((c) => `<label class="row" style="align-items:center;padding-left:18px"><input type="checkbox" class="uCam" value="${c.serial}" ${all || (u.cams || []).includes(c.serial) ? "checked" : ""} ${all ? "disabled" : ""}> ${esc(c.name)}</label>`).join("")}
+    </div>
+    <label class="row" style="align-items:center;margin-bottom:6px"><input type="checkbox" id="uNotify" ${u.notify !== false ? "checked" : ""}> Meldingen sturen naar deze persoon</label>
+    ${ntfyLink ? `<div class="d" style="margin-bottom:12px">Laat ${esc(u.name)} in de ntfy-app abonneren op:<br><b style="user-select:all;color:var(--fg)">${esc(u.topic)}</b></div>` : (id ? "" : '<div class="d" style="margin-bottom:12px">Na het opslaan krijgt deze persoon een eigen meldingskanaal.</div>')}
+    <div class="row">${id && id !== SEC.me.id ? `<button onclick="delUser('${id}')">Verwijderen</button>` : ""}<button onclick="closeModal()">Annuleren</button><button class="primary" onclick="saveUser('${id || ""}')">Opslaan</button></div>`);
+  $("#uRole")?.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $("#uRole").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); });
+}
+async function saveUser(id) {
+  const body = {
+    name: $("#uName").value.trim(),
+    cams: $("#uAll").checked ? "all" : [...document.querySelectorAll(".uCam:checked")].map((x) => x.value),
+    notify: $("#uNotify").checked,
+  };
+  const pin = $("#uPin").value.trim(); if (pin) body.pin = pin;
+  const role = $("#uRole .on")?.dataset.v; if (role) body.role = role;
+  try {
+    const j = await api(id ? `/api/users/${id}` : "/api/users", { method: "POST", body });
+    await loadSecurity();
+    if (!id && j.user?.topic) { openUser(j.user.id); toast("Toegevoegd. Hieronder staat het meldingskanaal."); } else { closeModal(); toast("Opgeslagen"); }
+  } catch (e) { toast(e.message); }
+}
+async function delUser(id) {
+  if (!confirm("Deze huisgenoot verwijderen?")) return;
+  try { await api(`/api/users/${id}`, { method: "DELETE" }); closeModal(); toast("Verwijderd"); loadSecurity(); } catch (e) { toast(e.message); }
 }
 function pinForm(title, hasCurrent, onSave) {
   modal(`<div style="font-weight:700;margin-bottom:4px">${title}</div><div class="muted">4 tot 12 cijfers. Laat "Nieuwe pincode" leeg om de pincode uit te zetten.</div>
@@ -1065,7 +1192,7 @@ function pinForm(title, hasCurrent, onSave) {
     try { await onSave($("#pinCur")?.value, n); closeModal(); toast(n ? "Pincode opgeslagen" : "Pincode uitgezet"); loadSecurity(); } catch (e) { toast(e.message); }
   };
 }
-function openAppPin(has) { pinForm("Pincode van de app", has, (current, pin) => api("/api/pin", { method: "POST", body: { current, pin } })); }
+function openAppPin() { pinForm("Mijn pincode", true, (current, pin) => api("/api/pin", { method: "POST", body: { current, pin } })); }
 function openCamPin(sn, name, has) { pinForm("Pincode voor " + name, has, async (current, pin) => { await api(`/api/device/${sn}/pin`, { method: "POST", body: { current, pin } }); await refreshAll(); }); }
 
 // ---------- updates ----------
@@ -1146,6 +1273,44 @@ function renderAppSettings() {
     + sw("ntfySnapshot", "Foto meesturen")
     + `<div class="set"><div><div class="l">Wachttijd tussen meldingen</div><div class="d">Voor beweging/persoon, aanbellen meldt altijd</div></div><select onchange="saveApp({motionCooldown:Number(this.value)})">${[[0, "Geen"], [60, "1 min"], [120, "2 min"], [300, "5 min"], [900, "15 min"]].map(([v, l]) => `<option value="${v}" ${v === s.motionCooldown ? "selected" : ""}>${l}</option>`).join("")}</select></div>`
     + `<div class="set"><button onclick="testNotify()">Testmelding sturen</button></div>`;
+  renderSmartNotif(s);
+}
+const KIND_IC = { ring: "🔔", person: "👤", motion: "〰", package: "📦" };
+const KIND_NL = { ring: "Aanbellen", person: "Persoon", motion: "Beweging", package: "Pakket" };
+function renderSmartNotif(s) {
+  const q = s.quiet || { enabled: false, from: "23:00", to: "07:00", allow: ["ring"] };
+  const muted = s.muteUntil && s.muteUntil > Date.now();
+  const until = muted ? new Date(s.muteUntil).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "";
+  const glob = { ring: s.notifyRing, person: s.notifyPerson, motion: s.notifyMotion, package: s.notifyPackage };
+  let h = `<div class="set"><div><div class="l">${muted ? "⏸ Gepauzeerd tot " + until : "Meldingen pauzeren"}</div><div class="d">${muted ? "Je krijgt even helemaal geen meldingen" : "Even helemaal geen meldingen. Kan ook met de knop 'Stil 1 uur' in een melding."}</div></div></div>
+    <div class="set" style="padding-top:0"><div class="seg" style="width:100%">${[[1, "1 uur"], [3, "3 uur"], [8, "8 uur"], [24, "1 dag"]].map(([v, l]) => `<button onclick="saveApp({muteHours:${v}})">${l}</button>`).join("")}${muted ? `<button class="on" onclick="saveApp({muteHours:0})">Hervatten</button>` : ""}</div></div>
+    <div class="set"><div><div class="l">Rustige uren</div><div class="d">In deze tijd alleen de meldingen die je hieronder aanvinkt</div></div><label class="sw"><input type="checkbox" ${q.enabled ? "checked" : ""} onchange="saveApp({quiet:{enabled:this.checked}})"><span></span></label></div>`;
+  if (q.enabled) h += `<div class="set" style="padding-top:0"><span class="muted">Van</span><input type="time" value="${q.from}" onchange="saveApp({quiet:{from:this.value}})"><span class="muted">tot</span><input type="time" value="${q.to}" onchange="saveApp({quiet:{to:this.value}})"></div>
+    <div class="set" style="padding-top:0;flex-wrap:wrap;justify-content:flex-start;gap:8px"><span class="muted" style="width:100%">Wel doorlaten:</span>${Object.keys(KIND_NL).map((k) => `<button class="chip ${(q.allow || []).includes(k) ? "on" : ""}" onclick="toggleQuietAllow('${k}')">${KIND_IC[k]} ${KIND_NL[k]}</button>`).join("")}</div>`;
+  h += `<div class="set"><div><div class="l">Alleen als modus Afwezig is</div><div class="d">Beweging, personen en pakketten alleen melden als je niet thuis bent. Aanbellen meldt altijd.</div></div><label class="sw"><input type="checkbox" ${s.notifyOnlyAway ? "checked" : ""} onchange="saveApp({notifyOnlyAway:this.checked})"><span></span></label></div>`;
+  if (S.devices.length) {
+    h += `<div class="set" style="display:block"><div class="l">Per camera</div><div class="d">Tik om een soort aan of uit te zetten. Grijs omrand = volgt de instelling hierboven.</div>`;
+    for (const d of S.devices) {
+      const cn = d.cfg?.notify || {};
+      h += `<div class="row" style="align-items:center;margin-top:10px;flex-wrap:wrap;gap:6px"><span style="flex:1 1 100%;font-size:13px">${esc(d.name)}</span>${Object.keys(KIND_NL).map((k) => {
+        const own = k in cn, on = own ? cn[k] : !!glob[k];
+        return `<button class="chip ${on ? "on" : ""}" style="${own ? "" : "border-style:dashed;opacity:.75"}" onclick="toggleCamNotify('${d.serial}','${k}',${on},${own})">${KIND_IC[k]} ${KIND_NL[k]}</button>`;
+      }).join("")}</div>`;
+    }
+    h += `</div>`;
+  }
+  $("#smartCard").innerHTML = h;
+}
+function toggleQuietAllow(k) {
+  const cur = new Set(S.settings.quiet?.allow || ["ring"]);
+  cur.has(k) ? cur.delete(k) : cur.add(k);
+  saveApp({ quiet: { allow: [...cur] } });
+}
+function toggleCamNotify(sn, k, on, own) {
+  const glob = { ring: S.settings.notifyRing, person: S.settings.notifyPerson, motion: S.settings.notifyMotion, package: S.settings.notifyPackage }[k];
+  // aan/uit wisselen; komt het weer overeen met de algemene instelling, dan de eigen instelling wissen
+  const next = !on;
+  saveApp({ cams: { [sn]: { notify: { [k]: next === !!glob ? null : next } } } });
 }
 $("#autoSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) saveApp({ autoDownload: b.dataset.v }); });
 async function saveApp(patch) {

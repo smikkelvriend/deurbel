@@ -59,6 +59,9 @@ const settings = Object.assign({
   recordSeconds: Number(process.env.RECORD_SECONDS || 30),
   snapshotMinutes: Number(process.env.SNAPSHOT_MINUTES ?? 60),
   snapshotOnEvent: true,
+  quiet: { enabled: false, from: "23:00", to: "07:00", allow: ["ring"] },
+  notifyOnlyAway: false,
+  muteUntil: 0,
   timelapse: true,
   timelapseDays: Number(process.env.TIMELAPSE_DAYS || 30),
   useEufyPicture: false,
@@ -81,7 +84,23 @@ sec.camPins = sec.camPins || {};
 function saveSec() { fs.writeFileSync(SEC_FILE, JSON.stringify(sec, null, 1), { mode: 0o600 }); }
 saveSec();
 const hmac = (x) => crypto.createHmac("sha256", secret).update(x).digest("hex");
-const appToken = () => (sec.appPin ? hmac("app:" + sec.appPin.hash) : "");
+// Huisgenoten: elke gebruiker heeft een eigen pincode, rol en cameratoegang.
+// Bestaande app-pincode wordt de eerste beheerder.
+if (!Array.isArray(sec.users)) {
+  sec.users = sec.appPin ? [{ id: "owner", name: "Eigenaar", pin: sec.appPin, role: "admin", cams: "all", notify: true }] : [];
+  saveSec();
+}
+const OPEN_USER = { id: "open", name: "Iedereen", role: "admin", cams: "all" };
+const userToken = (u) => u.id + "." + hmac("user:" + u.id + ":" + u.pin.hash).slice(0, 40);
+function currentUser(req) {
+  if (!sec.users.length) return OPEN_USER; // geen pincodes = iedereen is beheerder
+  const t = parseCookies(req).dt || "";
+  const u = sec.users.find((x) => t.startsWith(x.id + ".") && t === userToken(x));
+  return u || null;
+}
+const userSeesCam = (u, sn) => !!u && (u.cams === "all" || (Array.isArray(u.cams) && u.cams.includes(sn)));
+const isAdmin = (req) => currentUser(req)?.role === "admin";
+const publicUser = (u) => ({ id: u.id, name: u.name, role: u.role, cams: u.cams, topic: u.topic || null, notify: u.notify !== false });
 const camToken = (sn) => (sec.camPins[sn] ? hmac("cam:" + sn + ":" + sec.camPins[sn].hash) : "");
 
 // ================= Status =================
@@ -131,7 +150,10 @@ for (const r of recordings) {
 const sseClients = new Map(); // res -> req
 const lockedView = (d) => ({ serial: d.serial, name: d.name, model: d.model, isDoorbell: d.isDoorbell, locked: true, hasPin: true });
 function filterFor(req, msg) {
-  if (!Object.keys(sec.camPins).length) return msg;
+  const u = currentUser(req);
+  if (msg.type === "state") msg = { ...msg, me: u ? { id: u.id, name: u.name, role: u.role } : null, devices: msg.devices.filter((d) => !camHidden(req, d.serial)) };
+  if (msg.type === "device" && camHidden(req, msg.device.serial)) return null;
+  if (!Object.keys(sec.camPins).length && (!u || u.cams === "all")) return msg;
   const L = (sn) => sn && camLocked(req, sn);
   switch (msg.type) {
     case "state": return { ...msg, devices: msg.devices.map((d) => (L(d.serial) ? lockedView(d) : d)) };
@@ -507,10 +529,40 @@ function addEvent(serial, kind, detail) {
   scheduleSync(serial, 45000);
 }
 
+// ---- slimme meldingen ----
+const inQuietHours = (t = new Date()) => {
+  const q = settings.quiet;
+  if (!q || !q.enabled || !q.from || !q.to) return false;
+  const hm = t.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: ENV.tz });
+  return q.from <= q.to ? hm >= q.from && hm < q.to : hm >= q.from || hm < q.to; // ook over middernacht
+};
+function guardModeOf(serial) {
+  const st = state.stations[state.devices[serial]?.props?.stationSerialNumber] || state.stations[serial];
+  return st?.props?.guardMode;
+}
+// Mag er een melding komen voor deze gebeurtenis? Geeft een reden terug als het niet mag.
+function notifyBlocked(ev) {
+  const kind = ev.kind;
+  const camN = camCfg(ev.serial).notify || {};
+  const glob = { ring: settings.notifyRing, person: settings.notifyPerson, motion: settings.notifyMotion, package: settings.notifyPackage }[kind];
+  if (!(camN[kind] ?? glob)) return "uitgezet";
+  if (settings.muteUntil && Date.now() < settings.muteUntil) return "gepauzeerd";
+  if (inQuietHours(new Date(ev.time)) && !(settings.quiet.allow || ["ring"]).includes(kind)) return "rustige uren";
+  if (settings.notifyOnlyAway && kind !== "ring" && guardModeOf(ev.serial) !== undefined && guardModeOf(ev.serial) !== 0) return "niet op Afwezig";
+  return null;
+}
+// Wie krijgt de melding: jijzelf (NTFY_TOPIC) en huisgenoten met een eigen kanaal en toegang tot de camera
+function recipients(serial) {
+  const out = [];
+  if (ENV.ntfyTopic) out.push(ENV.ntfyTopic);
+  for (const u of sec.users || []) if (u.topic && u.notify !== false && userSeesCam(u, serial) && !out.includes(u.topic)) out.push(u.topic);
+  return out;
+}
 async function notify(ev) {
-  if (!ENV.ntfyTopic) return;
-  const want = { ring: settings.notifyRing, person: settings.notifyPerson, motion: settings.notifyMotion, package: settings.notifyPackage }[ev.kind];
-  if (!want) return;
+  const topics = recipients(ev.serial);
+  if (!topics.length) return;
+  const why = notifyBlocked(ev);
+  if (why) { log(`Geen melding (${why}):`, LABELS[ev.kind] || ev.kind); return; }
   if (ev.kind !== "ring") {
     const key = ev.serial + ":" + ev.kind;
     if (lastNotified[key] && ev.time - lastNotified[key] < settings.motionCooldown * 1000) return;
@@ -518,27 +570,33 @@ async function notify(ev) {
   }
   const title = LABELS[ev.kind] || "Deurbel";
   const time = new Date(ev.time).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit", timeZone: ENV.tz });
-  const message = `${ev.device} - ${time}${ev.detail ? " - " + ev.detail : ""}`;
+  const message = `${displayName(ev.serial)} - ${time}${ev.detail ? " - " + ev.detail : ""}`;
   const tags = { ring: "bell", person: "bust_in_silhouette", motion: "eyes", package: "package" }[ev.kind] || "bell";
-  const priority = ev.kind === "ring" ? "5" : ev.kind === "person" ? "4" : "3";
+  const quiet = inQuietHours(new Date(ev.time));
+  const priority = ev.kind === "ring" ? (quiet ? "4" : "5") : ev.kind === "person" ? "4" : "3";
+  const sendAll = (o) => Promise.all(topics.map((t) => ntfy({ ...o, topic: t }).catch((e) => log("Melding mislukt:", e.message))));
   if (ev.kind === "ring") {
-    await ntfy({ title, message, tags, priority });
+    await sendAll({ title, message, tags, priority });
     if (settings.ntfySnapshot) {
       const pic = await waitForPicture(ev.serial, 20000);
-      if (pic) await ntfy({ title: "Wie staat er voor de deur", message, tags: "camera", priority: "3", image: pic });
+      if (pic) await sendAll({ title: "Wie staat er voor de deur", message, tags: "camera", priority: "3", image: pic });
     }
   } else {
     const pic = settings.ntfySnapshot ? await waitForPicture(ev.serial, 12000) : null;
-    await ntfy({ title, message, tags, priority, image: pic });
+    await sendAll({ title, message, tags, priority, image: pic });
   }
 }
-async function ntfy({ title, message, tags, priority, image }) {
+const muteKey = () => hmac("mute").slice(0, 24);
+async function ntfy({ title, message, tags, priority, image, topic }) {
   const headers = { Title: title, Tags: tags, Priority: priority };
   if (ENV.ntfyToken) headers.Authorization = "Bearer " + ENV.ntfyToken;
-  if (ENV.publicUrl) { headers.Click = ENV.publicUrl; headers.Actions = `view, Live bekijken, ${ENV.publicUrl}/#live`; }
+  if (ENV.publicUrl) {
+    headers.Click = ENV.publicUrl;
+    headers.Actions = `view, Live bekijken, ${ENV.publicUrl}/#live; http, Stil 1 uur, ${ENV.publicUrl}/api/public/mute?h=1&k=${muteKey()}, method=POST, clear=true`;
+  }
   let body = message;
   if (image) { headers.Filename = "deurbel.jpg"; headers.Message = message; body = image; }
-  const r = await fetch(`${ENV.ntfyUrl}/${encodeURIComponent(ENV.ntfyTopic)}`, { method: image ? "PUT" : "POST", headers, body });
+  const r = await fetch(`${ENV.ntfyUrl}/${encodeURIComponent(topic || ENV.ntfyTopic)}`, { method: image ? "PUT" : "POST", headers, body });
   if (!r.ok) throw new Error("ntfy " + r.status + " " + (await r.text()).slice(0, 200));
 }
 
@@ -1288,8 +1346,9 @@ function parseCookies(req) {
   (req.headers.cookie || "").split(";").forEach((c) => { const i = c.indexOf("="); if (i > 0) out[c.slice(0, i).trim()] = decodeURIComponent(c.slice(i + 1).trim()); });
   return out;
 }
-const isAuthed = (req) => !sec.appPin || parseCookies(req).dt === appToken();
-const camLocked = (req, sn) => !!sec.camPins[sn] && parseCookies(req)["c_" + sn] !== camToken(sn);
+const isAuthed = (req) => !!currentUser(req);
+const camHidden = (req, sn) => !userSeesCam(currentUser(req), sn);
+const camLocked = (req, sn) => camHidden(req, sn) || (!!sec.camPins[sn] && parseCookies(req)["c_" + sn] !== camToken(sn));
 const stationLocked = (req, stSn) => Object.values(state.devices).some((d) => (d.props.stationSerialNumber === stSn || d.serial === stSn) && camLocked(req, d.serial));
 const serialOfId = (id) => String(id).split("-")[0];
 function json(res, code, obj) { res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(obj)); }
@@ -1330,13 +1389,22 @@ const server = http.createServer(async (req, res) => {
       const a = loginAttempts.get(ip) || { n: 0, t: 0 };
       if (a.n >= 5 && Date.now() - a.t < 60000) return json(res, 429, { error: "Te veel pogingen, wacht een minuut" });
       const body = await readBody(req);
-      if (!sec.appPin || checkPin(body.pin, sec.appPin)) {
+      const u = sec.users.length ? sec.users.find((x) => checkPin(body.pin, x.pin)) : OPEN_USER;
+      if (u) {
         loginAttempts.delete(ip);
-        res.setHeader("Set-Cookie", `dt=${appToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
-        return json(res, 200, { ok: true });
+        if (u !== OPEN_USER) { res.setHeader("Set-Cookie", `dt=${userToken(u)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`); log("Ingelogd:", u.name); }
+        return json(res, 200, { ok: true, name: u.name });
       }
       loginAttempts.set(ip, { n: a.n + 1, t: Date.now() });
       return json(res, 401, { error: "Verkeerde pincode" });
+    }
+    // "Stil 1 uur"-knop in de melding (zonder inloggen, beveiligd met een geheime sleutel)
+    if (p === "/api/public/mute") {
+      if (url.searchParams.get("k") !== muteKey()) return json(res, 403, { error: "nee" });
+      const h = Math.min(24, Math.max(0, Number(url.searchParams.get("h") || 1)));
+      settings.muteUntil = Date.now() + h * 3600000; writeJson(SETTINGS_FILE, settings); broadcast(publicState());
+      log(`Meldingen gepauzeerd voor ${h} uur (via melding)`);
+      return json(res, 200, { ok: true });
     }
     if (p.startsWith("/api/")) {
       if (!isAuthed(req)) return json(res, 401, { error: "login", needPin: true });
@@ -1359,18 +1427,97 @@ async function api(req, res, url) {
   let m;
 
   // --- pincodes ---
+  const me = currentUser(req);
   if (p === "/api/security") {
-    return json(res, 200, { appPin: !!sec.appPin, cameras: Object.values(state.devices).map((d) => ({ serial: d.serial, name: displayName(d.serial), hasPin: !!sec.camPins[d.serial], unlocked: !camLocked(req, d.serial) })) });
+    return json(res, 200, {
+      me: publicUser(me), hasPin: !!sec.users.length, admin: me.role === "admin",
+      users: me.role === "admin" ? sec.users.map(publicUser) : [],
+      ntfyUrl: ENV.ntfyUrl,
+      cameras: Object.values(state.devices).filter((d) => userSeesCam(me, d.serial)).map((d) => ({ serial: d.serial, name: displayName(d.serial), hasPin: !!sec.camPins[d.serial], unlocked: !camLocked(req, d.serial) })),
+      allCameras: me.role === "admin" ? Object.values(state.devices).map((d) => ({ serial: d.serial, name: displayName(d.serial) })) : [],
+    });
   }
+  const pinTaken = (pin, exceptId) => sec.users.some((x) => x.id !== exceptId && checkPin(pin, x.pin));
+  // eigen pincode wijzigen (of de allereerste instellen)
   if (p === "/api/pin" && post) {
     const b = await readBody(req);
-    if (sec.appPin && !checkPin(b.current, sec.appPin)) return json(res, 403, { error: "Huidige pincode klopt niet" });
     const np = String(b.pin ?? "").trim();
     if (np && !/^\d{4,12}$/.test(np)) return json(res, 400, { error: "Gebruik 4 tot 12 cijfers" });
-    sec.appPin = np ? hashPin(np) : null;
+    if (me === OPEN_USER) {
+      if (!np) return json(res, 400, { error: "Vul een pincode in" });
+      const u = { id: "owner", name: String(b.name || "Eigenaar").slice(0, 30), pin: hashPin(np), role: "admin", cams: "all", notify: true };
+      sec.users.push(u); saveSec();
+      res.setHeader("Set-Cookie", `dt=${userToken(u)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+      log("Pincode ingesteld, beheerder aangemaakt");
+      return json(res, 200, { ok: true });
+    }
+    if (!checkPin(b.current, me.pin)) return json(res, 403, { error: "Huidige pincode klopt niet" });
+    if (!np) {
+      if (sec.users.length > 1) return json(res, 400, { error: "Er zijn huisgenoten; verwijder die eerst voordat je de pincode uitzet" });
+      sec.users = []; saveSec(); log("Pincode van de app verwijderd");
+      return json(res, 200, { ok: true });
+    }
+    if (pinTaken(np, me.id)) return json(res, 400, { error: "Deze pincode is al van iemand anders" });
+    me.pin = hashPin(np); saveSec();
+    res.setHeader("Set-Cookie", `dt=${userToken(me)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+    log(`Pincode van ${me.name} gewijzigd`);
+    return json(res, 200, { ok: true });
+  }
+  if (p === "/api/logout" && post) {
+    res.setHeader("Set-Cookie", "dt=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    return json(res, 200, { ok: true });
+  }
+
+  // ---- alleen voor beheerders ----
+  const adminOnly =
+    (p === "/api/settings" && post) || p.startsWith("/api/users") ||
+    /^\/api\/device\/\w+\/(property|pin|snooze|refresh)$/.test(p) || p.startsWith("/api/station/") ||
+    (p === "/api/devices/refresh") || (p === "/api/update" && post) || p.startsWith("/api/auth/") ||
+    (req.method === "DELETE") || /^\/api\/recordings\/[\w-]+\/(keep|download)$/.test(p);
+  if (adminOnly && me.role !== "admin") return json(res, 403, { error: "Alleen een beheerder kan dit" });
+
+  // ---- huisgenoten beheren ----
+  if (p === "/api/users" && post) {
+    if (!sec.users.length) return json(res, 400, { error: "Stel eerst je eigen pincode in" });
+    const b = await readBody(req);
+    const name = String(b.name || "").trim().slice(0, 30), np = String(b.pin || "").trim();
+    if (!name) return json(res, 400, { error: "Vul een naam in" });
+    if (!/^\d{4,12}$/.test(np)) return json(res, 400, { error: "Pincode: 4 tot 12 cijfers" });
+    if (pinTaken(np)) return json(res, 400, { error: "Deze pincode is al van iemand anders" });
+    const u = { id: crypto.randomBytes(5).toString("hex"), name, pin: hashPin(np), role: b.role === "admin" ? "admin" : "member",
+      cams: Array.isArray(b.cams) ? b.cams.filter((x) => state.devices[x]) : "all", notify: b.notify !== false,
+      topic: ENV.ntfyTopic ? "deurbel-" + crypto.randomBytes(8).toString("hex") : null };
+    sec.users.push(u); saveSec();
+    log("Huisgenoot toegevoegd:", name);
+    return json(res, 200, { ok: true, user: publicUser(u) });
+  }
+  if ((m = p.match(/^\/api\/users\/(\w+)$/)) && post) {
+    const u = sec.users.find((x) => x.id === m[1]); if (!u) return json(res, 404, { error: "Onbekend" });
+    const b = await readBody(req);
+    if (b.name) u.name = String(b.name).trim().slice(0, 30);
+    if (b.role && u.id !== me.id) {
+      const newRole = b.role === "admin" ? "admin" : "member";
+      if (u.role === "admin" && newRole !== "admin" && sec.users.filter((x) => x.role === "admin").length < 2) return json(res, 400, { error: "Er moet minstens één beheerder blijven" });
+      u.role = newRole;
+    }
+    if (b.cams !== undefined) u.cams = Array.isArray(b.cams) ? b.cams.filter((x) => state.devices[x]) : "all";
+    if (typeof b.notify === "boolean") u.notify = b.notify;
+    if (b.pin) {
+      const np = String(b.pin).trim();
+      if (!/^\d{4,12}$/.test(np)) return json(res, 400, { error: "Pincode: 4 tot 12 cijfers" });
+      if (pinTaken(np, u.id)) return json(res, 400, { error: "Deze pincode is al van iemand anders" });
+      u.pin = hashPin(np);
+    }
+    if (b.newTopic) u.topic = "deurbel-" + crypto.randomBytes(8).toString("hex");
     saveSec();
-    log(np ? "Pincode van de app gewijzigd" : "Pincode van de app verwijderd");
-    res.setHeader("Set-Cookie", `dt=${appToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+    return json(res, 200, { ok: true, user: publicUser(u) });
+  }
+  if ((m = p.match(/^\/api\/users\/(\w+)$/)) && req.method === "DELETE") {
+    const u = sec.users.find((x) => x.id === m[1]); if (!u) return json(res, 404, { error: "Onbekend" });
+    if (u.id === me.id) return json(res, 400, { error: "Je kunt jezelf niet verwijderen" });
+    if (u.role === "admin" && sec.users.filter((x) => x.role === "admin").length < 2) return json(res, 400, { error: "Er moet minstens één beheerder blijven" });
+    sec.users = sec.users.filter((x) => x !== u); saveSec();
+    log("Huisgenoot verwijderd:", u.name);
     return json(res, 200, { ok: true });
   }
   if ((m = p.match(/^\/api\/device\/(\w+)\/unlock$/)) && post) {
@@ -1492,6 +1639,38 @@ async function api(req, res, url) {
     return json(res, 200, { ok: true });
   }
 
+  // --- overzicht / statistieken ---
+  if (p === "/api/stats") {
+    const days = Math.min(365, Math.max(1, Number(url.searchParams.get("days") || 30)));
+    const serial = url.searchParams.get("serial");
+    const since = new Date(); since.setHours(0, 0, 0, 0); since.setDate(since.getDate() - (days - 1));
+    const list = events.filter((e) => e.time >= since.getTime() && (!serial || e.serial === serial) && visible(e.serial));
+    const KINDS = ["ring", "person", "motion", "package"];
+    const byDay = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date(since); d.setDate(since.getDate() + i);
+      byDay.push({ day: dayStr(d.getTime()), ring: 0, person: 0, motion: 0, package: 0 });
+    }
+    const dayIdx = Object.fromEntries(byDay.map((x, i) => [x.day, i]));
+    const byHour = Array.from({ length: 24 }, () => ({ all: 0, ring: 0 }));
+    const byWeekday = Array(7).fill(0); // ma..zo
+    const totals = { ring: 0, person: 0, motion: 0, package: 0 };
+    const perCam = {};
+    for (const e of list) {
+      const k = KINDS.includes(e.kind) ? e.kind : "motion";
+      totals[k]++;
+      const i = dayIdx[dayStr(e.time)]; if (i != null) byDay[i][k]++;
+      const h = Number(new Date(e.time).toLocaleTimeString("nl-NL", { hour: "2-digit", hour12: false, timeZone: ENV.tz }).slice(0, 2)) % 24;
+      byHour[h].all++; if (k === "ring") byHour[h].ring++;
+      const wd = (new Date(new Date(e.time).toLocaleString("en-US", { timeZone: ENV.tz })).getDay() + 6) % 7;
+      byWeekday[wd]++;
+      const name = displayName(e.serial); perCam[name] = (perCam[name] || 0) + 1;
+    }
+    const busiestDay = byDay.reduce((a, x) => { const t = x.ring + x.person + x.motion + x.package; return t > a.total ? { day: x.day, total: t } : a; }, { day: null, total: 0 });
+    const busiestHour = byHour.reduce((a, x, i) => (x.all > a.count ? { hour: i, count: x.all } : a), { hour: null, count: 0 });
+    return json(res, 200, { days, total: list.length, totals, byDay, byHour, byWeekday, perCam, busiestDay, busiestHour });
+  }
+
   // --- nieuwe camera's zoeken ---
   if (p === "/api/devices/refresh" && post) {
     await send("driver.poll_refresh", {}, 60000).catch((e) => log("poll_refresh:", e.message));
@@ -1532,12 +1711,25 @@ async function api(req, res, url) {
     if (b.snapshotMinutes != null && isFinite(b.snapshotMinutes)) settings.snapshotMinutes = num(b.snapshotMinutes, 0, 1440);
     if (b.timelapseDays != null && isFinite(b.timelapseDays)) settings.timelapseDays = num(b.timelapseDays, 0, 3650);
     if (typeof b.defaultCamera === "string") settings.defaultCamera = b.defaultCamera;
+    if (b.quiet && typeof b.quiet === "object") {
+      const q = settings.quiet || { enabled: false, from: "23:00", to: "07:00", allow: ["ring"] };
+      if (typeof b.quiet.enabled === "boolean") q.enabled = b.quiet.enabled;
+      for (const k of ["from", "to"]) if (/^\d{2}:\d{2}$/.test(b.quiet[k] || "")) q[k] = b.quiet[k];
+      if (Array.isArray(b.quiet.allow)) q.allow = b.quiet.allow.filter((x) => ["ring", "person", "motion", "package"].includes(x));
+      settings.quiet = q;
+    }
+    if (typeof b.notifyOnlyAway === "boolean") settings.notifyOnlyAway = b.notifyOnlyAway;
+    if (b.muteHours != null && isFinite(b.muteHours)) settings.muteUntil = Number(b.muteHours) > 0 ? Date.now() + Number(b.muteHours) * 3600000 : 0;
     if (b.cams && typeof b.cams === "object") {
       settings.cams = settings.cams || {};
       for (const [sn, c] of Object.entries(b.cams)) {
         const cur = settings.cams[sn] || {};
         if (["auto", "doorbell", "camera"].includes(c.kind)) cur.kind = c.kind;
         if (c.tlSeconds != null && isFinite(c.tlSeconds)) cur.tlSeconds = Math.max(-1, Math.min(86400, Number(c.tlSeconds)));
+        if (c.notify && typeof c.notify === "object") {
+          cur.notify = cur.notify || {};
+          for (const k of ["ring", "person", "motion", "package"]) if (k in c.notify) { if (c.notify[k] === null) delete cur.notify[k]; else cur.notify[k] = !!c.notify[k]; }
+        }
         settings.cams[sn] = cur;
       }
       setTimeout(manageContinuous, 500);
@@ -1647,7 +1839,7 @@ async function api(req, res, url) {
 server.on("error", (e) => { log(`Kan poort ${ENV.port} niet openen: ${e.message}. Draait er al iets op deze poort? Kies een andere PORT in .env.`); process.exit(1); });
 server.listen(ENV.port, () => {
   log(`Dashboard op http://0.0.0.0:${ENV.port}`);
-  if (!sec.appPin) log("Let op: geen pincode ingesteld, het dashboard is open voor iedereen op je netwerk");
+  if (!sec.users.length) log("Let op: geen pincode ingesteld, het dashboard is open voor iedereen op je netwerk");
   if (!ENV.ntfyTopic) log("Meldingen staan uit (NTFY_TOPIC leeg)");
   connectEufy();
   enforceStorage().catch(() => {});
