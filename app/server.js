@@ -168,7 +168,13 @@ function send(command, extra = {}, timeoutMs = 20000) {
 function connectEufy() {
   log("Verbinden met", ENV.eufyWs);
   try { ws = new WebSocket(ENV.eufyWs); } catch (e) { log("WebSocket-fout:", e.message); return scheduleReconnect(); }
+  // Blijft de verbinding hangen (bv. omdat eufy-security-ws nog aan het opstarten is)? Dan opnieuw proberen.
+  const me = ws;
+  const connectTimer = setTimeout(() => {
+    if (me.readyState !== 1) { log("Geen antwoord van eufy-security-ws, opnieuw proberen"); me._dead = true; try { me.close(); } catch {} scheduleReconnect(); }
+  }, 15000);
   ws.addEventListener("open", async () => {
+    clearTimeout(connectTimer);
     reconnectDelay = 2000;
     state.eufyConnected = true;
     log("Verbonden met eufy-security-ws");
@@ -185,6 +191,8 @@ function connectEufy() {
     try { handleMessage(msg); } catch (e) { log("Fout bij verwerken bericht:", e.message); }
   });
   ws.addEventListener("close", () => {
+    clearTimeout(connectTimer);
+    if (me._dead || ws !== me) return; // oude verbinding, al vervangen
     if (state.eufyConnected) log("Verbinding met eufy-security-ws verbroken");
     state.eufyConnected = false;
     for (const p of pending.values()) { clearTimeout(p.t); p.reject(new Error("Verbinding verbroken")); }
