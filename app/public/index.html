@@ -934,7 +934,8 @@ async function tlDelete() {
 
 // ---------- beveiliging ----------
 async function loadSecurity() {
-  const j = await api("/api/security").catch(() => null); if (!j) return;
+  const j = await api("/api/security").catch(() => null);
+  if (!j) { $("#secCard").innerHTML = '<div class="set"><div class="d">Server niet bereikbaar (wordt hij bijgewerkt?). Opnieuw proberen…</div></div>'; setTimeout(() => { if ($("#p-set").classList.contains("on")) loadSecurity(); }, 4000); return; }
   let h = `<div class="set"><div><div class="l">Pincode van de app</div><div class="d">${j.appPin ? "Staat aan" : "Uit: iedereen op je netwerk kan het dashboard openen"}</div></div><button class="small" onclick="openAppPin(${j.appPin})">${j.appPin ? "Wijzigen" : "Instellen"}</button></div>`;
   for (const c of j.cameras) {
     h += `<div class="set"><div><div class="l">${c.hasPin ? "🔒" : "🔓"} ${esc(c.name)}</div><div class="d">${c.hasPin ? (c.unlocked ? "Eigen pincode · nu ontgrendeld" : "Eigen pincode · vergrendeld") : "Geen eigen pincode"}</div></div>
@@ -964,7 +965,8 @@ function openCamPin(sn, name, has) { pinForm("Pincode voor " + name, has, async 
 let updPoll = null, updFrom = null;
 async function loadUpdate() {
   const u = await api("/api/update").catch(() => null);
-  const el = $("#updCard"); if (!u) return;
+  const el = $("#updCard");
+  if (!u) { el.innerHTML = '<div class="set"><div class="d">Server niet bereikbaar, waarschijnlijk wordt hij net bijgewerkt. Even geduld…</div></div>'; if (!updPoll) setTimeout(() => { if ($("#p-set").classList.contains("on")) loadUpdate(); }, 4000); return; }
   if (!u.installed) { el.innerHTML = '<div class="set"><div class="d">Automatische updates zijn nog niet ingesteld. Installeer via GitHub (zie README) om ze aan te zetten.</div></div>'; return; }
   const when = (t) => t ? new Date(t).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "?";
   const color = { ok: "var(--ok)", available: "var(--fg)", updating: "var(--fg)", error: "var(--red)" }[u.state] || "var(--dim)";
@@ -986,7 +988,8 @@ async function updAction(a) {
 
 // ---------- app-instellingen ----------
 async function loadAppSettings() {
-  const j = await api("/api/settings");
+  const j = await api("/api/settings").catch(() => null);
+  if (!j) { loadUpdate(); loadSecurity(); return; }
   S.settings = j.settings; storage = j.storage;
   renderAppSettings(); renderStorage();
   loadUpdate(); loadSecurity();
@@ -1125,9 +1128,22 @@ function connectStream() {
       case "live-ended": if (msg.serial === cur && isLive) { stopLive(true); toast("Live gestopt: " + msg.reason); } break;
     }
   };
-  es.onerror = () => { $("#led").className = "led bad"; $("#statusTxt").textContent = "Geen verbinding"; };
+  es.onopen = () => { if (es._wasDown) { es._wasDown = false; reloadVisible(); } };
+  es.onerror = () => { es._wasDown = true; $("#led").className = "led bad"; $("#statusTxt").textContent = "Geen verbinding"; };
 }
 setInterval(() => { if (!isLive && dev()) showPicture(dev()); }, 30000);
+// Achtergrond-tabbladen geven hun verbinding vrij (een browser staat maar 6 verbindingen per server toe)
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { es?.close(); es = null; }
+  else if (!es) { connectStream(); reloadVisible(); }
+});
+function reloadVisible() {
+  api("/api/state").then((st) => { S = st; renderStatus(); renderDevice(); }).catch(() => {});
+  loadRecent().catch(() => {});
+  if ($("#p-rec").classList.contains("on")) loadRec();
+  if ($("#p-log").classList.contains("on")) loadLog().catch(() => {});
+  if ($("#p-set").classList.contains("on")) loadAppSettings().catch(() => {});
+}
 
 async function start() {
   try { S = await api("/api/state"); } catch { return; }
