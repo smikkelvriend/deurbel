@@ -68,7 +68,21 @@ if (!settings.recordOn) settings.recordOn = { ring: true, person: true, motion: 
 let secret;
 try { secret = fs.readFileSync(path.join(ENV.dataDir, "secret"), "utf8"); }
 catch { secret = crypto.randomBytes(32).toString("hex"); fs.writeFileSync(path.join(ENV.dataDir, "secret"), secret); }
-const authToken = crypto.createHmac("sha256", secret).update("pin:" + ENV.pin).digest("hex");
+// ================= Pincodes =================
+// security.json bewaart de pincode van de app en per camera (gehasht). De eerste keer
+// wordt APP_PIN uit .env overgenomen; daarna pas je hem aan in het dashboard.
+// Pincode vergeten? Verwijder deurbel-data/security.json, dan geldt weer APP_PIN uit .env.
+const SEC_FILE = path.join(ENV.dataDir, "security.json");
+const sec = readJson(SEC_FILE, {});
+const hashPin = (pin, salt = crypto.randomBytes(8).toString("hex")) => ({ salt, hash: crypto.scryptSync(String(pin), salt, 32).toString("hex") });
+const checkPin = (pin, h) => { if (!h) return false; const a = Buffer.from(hashPin(String(pin ?? ""), h.salt).hash, "hex"); return crypto.timingSafeEqual(a, Buffer.from(h.hash, "hex")); };
+if (sec.appPin === undefined) sec.appPin = ENV.pin ? hashPin(ENV.pin) : null;
+sec.camPins = sec.camPins || {};
+function saveSec() { fs.writeFileSync(SEC_FILE, JSON.stringify(sec, null, 1), { mode: 0o600 }); }
+saveSec();
+const hmac = (x) => crypto.createHmac("sha256", secret).update(x).digest("hex");
+const appToken = () => (sec.appPin ? hmac("app:" + sec.appPin.hash) : "");
+const camToken = (sn) => (sec.camPins[sn] ? hmac("cam:" + sn + ":" + sec.camPins[sn].hash) : "");
 
 // ================= Status =================
 const state = {
@@ -88,10 +102,29 @@ const saveRecordings = () => writeJson(path.join(ENV.dataDir, "recordings.json")
 for (const r of recordings) if (r.status === "downloading") r.status = r.file ? "done" : "remote";
 
 // ================= Server-Sent Events =================
-const sseClients = new Set();
+const sseClients = new Map(); // res -> req
+const lockedView = (d) => ({ serial: d.serial, name: d.name, model: d.model, locked: true, hasPin: true });
+function filterFor(req, msg) {
+  if (!Object.keys(sec.camPins).length) return msg;
+  const L = (sn) => sn && camLocked(req, sn);
+  switch (msg.type) {
+    case "state": return { ...msg, devices: msg.devices.map((d) => (L(d.serial) ? lockedView(d) : d)) };
+    case "device": return L(msg.device.serial) ? { type: "device", device: lockedView(msg.device) } : msg;
+    case "event": case "event-update": return L(msg.event.serial) ? null : msg;
+    case "recording": return L(msg.recording.serial) ? null : msg;
+    case "live-ended": return L(msg.serial) ? null : msg;
+    case "download-progress": return L(serialOfId(msg.id)) ? null : msg;
+    default: return msg;
+  }
+}
 function broadcast(msg) {
-  const line = "data: " + JSON.stringify(msg) + "\n\n";
-  for (const res of sseClients) res.write(line);
+  let plain = null;
+  for (const [res, req] of sseClients) {
+    const out = filterFor(req, msg);
+    if (!out) continue;
+    if (out === msg) { plain = plain || "data: " + JSON.stringify(msg) + "\n\n"; res.write(plain); }
+    else res.write("data: " + JSON.stringify(out) + "\n\n");
+  }
 }
 function publicState() {
   return {
@@ -140,6 +173,7 @@ function publicDevice(d) {
     hardwareVersion: p.hardwareVersion,
     stationSerial: p.stationSerialNumber,
     station: st ? { serial: st.serial, name: st.props.name, model: st.props.model, guardMode: st.props.guardMode, currentMode: st.props.currentMode, guardStates: st.meta?.guardMode?.states || null, settings: settingList(st.props, st.meta).filter((s) => s.name !== "guardMode") } : null,
+    hasPin: !!sec.camPins[d.serial],
     hasPicture: !!d.picture,
     pictureAt: d.pictureAt || null,
     live: live.get(d.serial)?.status || "idle",
@@ -1048,7 +1082,10 @@ function parseCookies(req) {
   (req.headers.cookie || "").split(";").forEach((c) => { const i = c.indexOf("="); if (i > 0) out[c.slice(0, i).trim()] = decodeURIComponent(c.slice(i + 1).trim()); });
   return out;
 }
-const isAuthed = (req) => !ENV.pin || parseCookies(req).dt === authToken;
+const isAuthed = (req) => !sec.appPin || parseCookies(req).dt === appToken();
+const camLocked = (req, sn) => !!sec.camPins[sn] && parseCookies(req)["c_" + sn] !== camToken(sn);
+const stationLocked = (req, stSn) => Object.values(state.devices).some((d) => (d.props.stationSerialNumber === stSn || d.serial === stSn) && camLocked(req, d.serial));
+const serialOfId = (id) => String(id).split("-")[0];
 function json(res, code, obj) { res.writeHead(code, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(obj)); }
 function readRaw(req, max = 1e6) {
   return new Promise((resolve, reject) => {
@@ -1087,9 +1124,9 @@ const server = http.createServer(async (req, res) => {
       const a = loginAttempts.get(ip) || { n: 0, t: 0 };
       if (a.n >= 5 && Date.now() - a.t < 60000) return json(res, 429, { error: "Te veel pogingen, wacht een minuut" });
       const body = await readBody(req);
-      if (!ENV.pin || String(body.pin || "") === ENV.pin) {
+      if (!sec.appPin || checkPin(body.pin, sec.appPin)) {
         loginAttempts.delete(ip);
-        res.setHeader("Set-Cookie", `dt=${authToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+        res.setHeader("Set-Cookie", `dt=${appToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
         return json(res, 200, { ok: true });
       }
       loginAttempts.set(ip, { n: a.n + 1, t: Date.now() });
@@ -1115,11 +1152,71 @@ async function api(req, res, url) {
   const post = req.method === "POST";
   let m;
 
-  if (p === "/api/state") return json(res, 200, publicState());
+  // --- pincodes ---
+  if (p === "/api/security") {
+    return json(res, 200, { appPin: !!sec.appPin, cameras: Object.values(state.devices).map((d) => ({ serial: d.serial, name: d.props.name || d.serial, hasPin: !!sec.camPins[d.serial], unlocked: !camLocked(req, d.serial) })) });
+  }
+  if (p === "/api/pin" && post) {
+    const b = await readBody(req);
+    if (sec.appPin && !checkPin(b.current, sec.appPin)) return json(res, 403, { error: "Huidige pincode klopt niet" });
+    const np = String(b.pin ?? "").trim();
+    if (np && !/^\d{4,12}$/.test(np)) return json(res, 400, { error: "Gebruik 4 tot 12 cijfers" });
+    sec.appPin = np ? hashPin(np) : null;
+    saveSec();
+    log(np ? "Pincode van de app gewijzigd" : "Pincode van de app verwijderd");
+    res.setHeader("Set-Cookie", `dt=${appToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+    return json(res, 200, { ok: true });
+  }
+  if ((m = p.match(/^\/api\/device\/(\w+)\/unlock$/)) && post) {
+    const ip = req.socket.remoteAddress, key = ip + ":" + m[1];
+    const a = loginAttempts.get(key) || { n: 0, t: 0 };
+    if (a.n >= 5 && Date.now() - a.t < 60000) return json(res, 429, { error: "Te veel pogingen, wacht een minuut" });
+    const b = await readBody(req);
+    if (!sec.camPins[m[1]] || checkPin(b.pin, sec.camPins[m[1]])) {
+      loginAttempts.delete(key);
+      const hours = Math.min(720, Math.max(0, Number(b.hours ?? 12)));
+      res.setHeader("Set-Cookie", `c_${m[1]}=${camToken(m[1])}; Path=/; HttpOnly; SameSite=Lax${hours ? "; Max-Age=" + hours * 3600 : ""}`);
+      return json(res, 200, { ok: true });
+    }
+    loginAttempts.set(key, { n: a.n + 1, t: Date.now() });
+    return json(res, 403, { error: "Verkeerde pincode" });
+  }
+  if ((m = p.match(/^\/api\/device\/(\w+)\/lock$/)) && post) {
+    res.setHeader("Set-Cookie", `c_${m[1]}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    return json(res, 200, { ok: true });
+  }
+  if ((m = p.match(/^\/api\/device\/(\w+)\/pin$/)) && post) {
+    const b = await readBody(req);
+    if (!state.devices[m[1]]) return json(res, 404, { error: "Onbekende camera" });
+    if (sec.camPins[m[1]] && !checkPin(b.current, sec.camPins[m[1]])) return json(res, 403, { error: "Huidige pincode van deze camera klopt niet" });
+    const np = String(b.pin ?? "").trim();
+    if (np && !/^\d{4,12}$/.test(np)) return json(res, 400, { error: "Gebruik 4 tot 12 cijfers" });
+    if (np) sec.camPins[m[1]] = hashPin(np); else delete sec.camPins[m[1]];
+    saveSec();
+    log(`Pincode camera ${m[1]} ${np ? "ingesteld" : "verwijderd"}`);
+    if (np) res.setHeader("Set-Cookie", `c_${m[1]}=${camToken(m[1])}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`);
+    // iedereen opnieuw bijwerken (vergrendelde weergave)
+    for (const [r, q] of sseClients) r.write("data: " + JSON.stringify(filterFor(q, publicState())) + "\n\n");
+    return json(res, 200, { ok: true });
+  }
+
+  // --- vergrendelde camera's afschermen ---
+  {
+    let sn = null;
+    if ((m = p.match(/^\/api\/(?:device|timelapse)\/(\w+)/))) sn = m[1];
+    else if ((m = p.match(/^\/api\/recordings\/([\w-]+?)(?:\.mp4|\.jpg|\/|$)/)) && m[1] !== "sync") sn = serialOfId(m[1]);
+    else if ((m = p.match(/^\/api\/snapshot\/([\w.-]+)$/))) sn = serialOfId(m[1]);
+    else if ((m = p.match(/^\/api\/events\/([\w-]+)$/))) sn = events.find((e) => e.id === m[1])?.serial;
+    if (sn && camLocked(req, sn)) return json(res, 423, { error: "Deze camera is vergrendeld", locked: true });
+    if ((m = p.match(/^\/api\/station\/(\w+)/)) && stationLocked(req, m[1])) return json(res, 423, { error: "Ontgrendel eerst de camera's op dit station", locked: true });
+  }
+  const visible = (sn) => !camLocked(req, sn);
+
+  if (p === "/api/state") return json(res, 200, filterFor(req, publicState()));
   if (p === "/api/stream") {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-    res.write("data: " + JSON.stringify(publicState()) + "\n\n");
-    sseClients.add(res);
+    res.write("data: " + JSON.stringify(filterFor(req, publicState())) + "\n\n");
+    sseClients.set(res, req);
     const ka = setInterval(() => res.write(": ping\n\n"), 25000);
     req.on("close", () => { clearInterval(ka); sseClients.delete(res); });
     return;
@@ -1129,7 +1226,8 @@ async function api(req, res, url) {
   if (p === "/api/events") {
     const before = Number(url.searchParams.get("before") || Infinity);
     const kind = url.searchParams.get("kind");
-    return json(res, 200, { events: events.filter((e) => e.time < before && (!kind || e.kind === kind)).slice(0, 50) });
+    const serial = url.searchParams.get("serial");
+    return json(res, 200, { events: events.filter((e) => e.time < before && (!kind || e.kind === kind) && (!serial || e.serial === serial) && visible(e.serial)).slice(0, 50) });
   }
   if ((m = p.match(/^\/api\/events\/([\w-]+)$/)) && req.method === "DELETE") {
     const i = events.findIndex((e) => e.id === m[1]);
@@ -1142,7 +1240,8 @@ async function api(req, res, url) {
   if (p === "/api/recordings") {
     const before = Number(url.searchParams.get("before") || Infinity);
     const filter = url.searchParams.get("filter") || "";
-    const list = recordings.filter((r) => r.start < before && (!filter || (filter === "saved" ? r.file : filter === "person" ? (r.person || r.kind === "person") : r.kind === filter))).slice(0, 40);
+    const serial = url.searchParams.get("serial");
+    const list = recordings.filter((r) => r.start < before && (!serial || r.serial === serial) && visible(r.serial) && (!filter || (filter === "saved" ? r.file : filter === "person" ? (r.person || r.kind === "person") : r.kind === filter))).slice(0, 40);
     return json(res, 200, { recordings: list, storage: await storageInfo() });
   }
   if (p === "/api/recordings/sync" && post) { await syncRecordings(); return json(res, 200, { ok: true }); }
@@ -1215,6 +1314,7 @@ async function api(req, res, url) {
     if (b.liveMaxSeconds != null && isFinite(b.liveMaxSeconds)) settings.liveMaxSeconds = num(b.liveMaxSeconds, 30, 1800);
     if (b.snapshotMinutes != null && isFinite(b.snapshotMinutes)) settings.snapshotMinutes = num(b.snapshotMinutes, 0, 1440);
     if (b.timelapseDays != null && isFinite(b.timelapseDays)) settings.timelapseDays = num(b.timelapseDays, 0, 3650);
+    if (typeof b.defaultCamera === "string") settings.defaultCamera = b.defaultCamera;
     for (const k of ["snapshotOnEvent", "useEufyPicture", "timelapse"]) if (typeof b[k] === "boolean") settings[k] = b[k];
     if (b.recordSeconds != null && isFinite(b.recordSeconds)) settings.recordSeconds = num(b.recordSeconds, 10, 180);
     if (b.recordOn && typeof b.recordOn === "object") for (const k of ["ring", "person", "motion", "package"]) if (typeof b.recordOn[k] === "boolean") settings.recordOn[k] = b.recordOn[k];
@@ -1306,9 +1406,10 @@ async function api(req, res, url) {
   return json(res, 404, { error: "Onbekend" });
 }
 
+server.on("error", (e) => { log(`Kan poort ${ENV.port} niet openen: ${e.message}. Draait er al iets op deze poort? Kies een andere PORT in .env.`); process.exit(1); });
 server.listen(ENV.port, () => {
   log(`Dashboard op http://0.0.0.0:${ENV.port}`);
-  if (!ENV.pin) log("Let op: geen APP_PIN ingesteld, het dashboard is open voor iedereen op je netwerk");
+  if (!sec.appPin) log("Let op: geen pincode ingesteld, het dashboard is open voor iedereen op je netwerk");
   if (!ENV.ntfyTopic) log("Meldingen staan uit (NTFY_TOPIC leeg)");
   connectEufy();
   enforceStorage().catch(() => {});

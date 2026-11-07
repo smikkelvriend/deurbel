@@ -142,6 +142,8 @@
   <!-- ================= DEUR ================= -->
   <section class="page on" id="p-deur">
     <select id="devsel" class="devsel" style="display:none" onchange="selectDevice(this.value)"></select>
+    <div id="lockPanel" style="display:none"></div>
+    <div id="devContent">
     <div class="card">
       <div class="view" id="view">
         <img id="viewImg" alt="" style="display:none" onload="fitView(this.naturalWidth,this.naturalHeight)">
@@ -171,13 +173,15 @@
 
     <div id="modeCard"></div>
 
-    <div class="sect">Laatste gebeurtenissen <a href="#log" class="muted" style="text-decoration:none">Alles ›</a></div>
+    <div class="sect"><span>Laatste gebeurtenissen <span id="recentCam" style="color:var(--fg)"></span></span><a href="#log" class="muted" style="text-decoration:none">Alles ›</a></div>
     <div class="card" id="recent"></div>
+    </div>
   </section>
 
   <!-- ================= OPNAMES ================= -->
   <section class="page" id="p-rec">
-    <div class="seg" id="recMode" style="margin-bottom:14px"><button class="on" data-v="rec">Opnames</button><button data-v="tl">Timelapse</button></div>
+    <select id="recCam" class="devsel camsel" style="display:none"></select>
+    <div class="seg" id="recMode" style="margin-bottom:12px"><button class="on" data-v="rec">Opnames</button><button data-v="tl">Timelapse</button></div>
     <div id="tlSection" style="display:none">
       <div class="chips" id="tlDays"></div>
       <div class="card" style="margin-top:10px">
@@ -218,6 +222,7 @@
 
   <!-- ================= LOG ================= -->
   <section class="page" id="p-log">
+    <select id="logCam" class="devsel camsel" style="display:none"></select>
     <div class="chips" id="chips">
       <button class="chip on" data-k="">Alles</button>
       <button class="chip" data-k="ring">Aanbellen</button>
@@ -275,6 +280,12 @@
 
     <div class="sect" id="stTitle" style="display:none">Basisstation</div>
     <div class="card" id="stSettings" style="display:none"></div>
+
+    <div class="sect" id="camSect" style="display:none">Camera's</div>
+    <div class="card" id="camCard" style="display:none"></div>
+
+    <div class="sect">Beveiliging</div>
+    <div class="card" id="secCard"><div class="set"><div class="l muted">Laden…</div></div></div>
 
     <div class="sect">Updates</div>
     <div class="card" id="updCard"><div class="set"><div class="l muted">Laden…</div></div></div>
@@ -421,10 +432,29 @@ async function sendCaptcha() { try { await api("/api/auth/captcha", { method: "P
 
 function renderDevice() {
   const sel = $("#devsel");
-  if (S.devices.length > 1) { sel.style.display = ""; sel.innerHTML = S.devices.map((d) => `<option value="${d.serial}" ${d.serial === cur ? "selected" : ""}>${esc(d.name)}</option>`).join(""); }
+  if (S.devices.length > 1) { sel.style.display = ""; sel.innerHTML = S.devices.map((d) => `<option value="${d.serial}" ${d.serial === cur ? "selected" : ""}>${d.locked ? "🔒 " : ""}${esc(d.name)}</option>`).join(""); }
   else sel.style.display = "none";
+  renderCamSelects();
   const d = dev(); if (!d) return;
   if (!cur) cur = d.serial;
+  $("#recentCam").textContent = S.devices.length > 1 ? "· " + d.name : "";
+  if (d.locked) {
+    if (isLive) stopLive(true);
+    $("#devContent").style.display = "none";
+    const lp = $("#lockPanel"); lp.style.display = "";
+    if (lp.dataset.sn !== d.serial) {
+      lp.dataset.sn = d.serial;
+      lp.innerHTML = `<div class="card pad" style="text-align:center;padding:36px 20px">
+        <div style="font-size:40px">🔒</div><div style="font-weight:700;margin:10px 0 4px">${esc(d.name)} is vergrendeld</div>
+        <div class="muted">Vul de pincode van deze camera in</div>
+        <input id="camPin" class="big" type="password" inputmode="numeric" autocomplete="off" onkeydown="if(event.key==='Enter')unlockCam()">
+        <select id="camPinHours" style="max-width:none;width:100%;margin-bottom:12px"><option value="0">Tot ik de app sluit</option><option value="1">1 uur ontgrendeld</option><option value="12" selected>12 uur ontgrendeld</option><option value="168">1 week ontgrendeld</option></select>
+        <button class="primary" style="width:100%" onclick="unlockCam()">Ontgrendelen</button></div>`;
+    }
+    renderMode(d); renderSettings(d); renderInfo(d);
+    return;
+  }
+  $("#lockPanel").style.display = "none"; $("#lockPanel").dataset.sn = ""; $("#devContent").style.display = "";
   $("#sBat").textContent = d.battery != null ? d.battery + "%" : "--";
   $("#sBat").style.color = d.batteryLow || (d.battery != null && d.battery < 20) ? "var(--red)" : "";
   const lvl = d.wifiSignalLevel;
@@ -455,10 +485,41 @@ function showPicture(d) {
     badge.style.display = ""; badge.className = "badge"; $("#viewBadgeTxt").textContent = d.pictureAt ? ago(d.pictureAt) : "Laatste beeld";
   } else { img.style.display = "none"; empty.style.display = ""; badge.style.display = "none"; empty.innerHTML = "Nog geen beeld<br><br>Tik op Live bekijken"; }
 }
-function selectDevice(sn) { if (isLive) stopLive(); cur = sn; localStorage.setItem("dev", sn); settingsKey = ""; renderDevice(); }
+function selectDevice(sn) { if (isLive) stopLive(); cur = sn; localStorage.setItem("dev", sn); settingsKey = ""; renderDevice(); loadRecent().catch(() => {}); }
+async function unlockCam() {
+  const d = dev(); if (!d) return;
+  try {
+    await api(`/api/device/${d.serial}/unlock`, { method: "POST", body: { pin: $("#camPin").value, hours: Number($("#camPinHours").value) } });
+    toast("Ontgrendeld"); await refreshAll();
+  } catch (e) { toast(e.message); $("#camPin").value = ""; }
+}
+async function lockCam(sn) { await api(`/api/device/${sn}/lock`, { method: "POST" }); toast("Vergrendeld"); await refreshAll(); }
+async function refreshAll() { S = await api("/api/state"); settingsKey = ""; renderStatus(); renderDevice(); loadRecent().catch(() => {}); connectStream(); if ($("#p-set").classList.contains("on")) loadSecurity(); }
+
+// camera-filter voor Log en Opnames
+let camF = localStorage.getItem("camF") || "";
+function renderCamSelects() {
+  if (camF && !S.devices.some((d) => d.serial === camF)) camF = "";
+  for (const id of ["#logCam", "#recCam"]) {
+    const el = $(id);
+    if (S.devices.length < 2) { el.style.display = "none"; continue; }
+    el.style.display = "";
+    const html = `<option value="">Alle camera's</option>` + S.devices.map((d) => `<option value="${d.serial}" ${d.serial === camF ? "selected" : ""}>${d.locked ? "🔒 " : ""}${esc(d.name)}</option>`).join("");
+    if (el._h !== html) { el.innerHTML = html; el._h = html; }
+    el.value = camF;
+  }
+}
+for (const id of ["#logCam", "#recCam"]) $(id).addEventListener("change", (e) => {
+  camF = e.target.value; localStorage.setItem("camF", camF); renderCamSelects();
+  logItems = []; if ($("#p-log").classList.contains("on")) loadLog();
+  if ($("#p-rec").classList.contains("on")) { loadRec(); if ($("#tlSection").style.display !== "none") { tlDay = null; loadTlDays(); } }
+});
+const camQ = () => (camF ? "&serial=" + camF : "");
+const tlSerial = () => camF || cur;
 
 // beveiligingsmodus + snooze
 function renderMode(d) {
+  if (d.locked) { $("#modeCard").innerHTML = ""; $("#modeCard")._h = ""; return; }
   const st = d.station;
   let h = "";
   if (st && st.guardStates) {
@@ -641,11 +702,11 @@ function renderRecent() {
   $("#recent").innerHTML = recent.length ? recent.slice(0, 5).map(evRow).join("") : '<div class="pad muted">Nog niks gebeurd. Zodra iemand aanbelt zie je het hier.</div>';
 }
 function renderLog() { $("#log").innerHTML = logItems.length ? logItems.map(evRow).join("") : '<div class="pad muted">Geen gebeurtenissen</div>'; }
-async function loadRecent() { recent = (await api("/api/events")).events; renderRecent(); }
-async function loadLog() { const j = await api("/api/events" + (logKind ? "?kind=" + logKind : "")); logItems = j.events; renderLog(); $("#moreBtn").style.display = j.events.length >= 50 ? "" : "none"; }
+async function loadRecent() { const d = dev(); if (!d || d.locked) { recent = []; return renderRecent(); } recent = (await api("/api/events?serial=" + d.serial)).events; renderRecent(); }
+async function loadLog() { const j = await api("/api/events?x=1" + (logKind ? "&kind=" + logKind : "") + camQ()); logItems = j.events; renderLog(); $("#moreBtn").style.display = j.events.length >= 50 ? "" : "none"; }
 async function loadMore() {
   const last = logItems[logItems.length - 1]; if (!last) return;
-  const j = await api(`/api/events?before=${last.time}${logKind ? "&kind=" + logKind : ""}`);
+  const j = await api(`/api/events?before=${last.time}${logKind ? "&kind=" + logKind : ""}${camQ()}`);
   logItems = logItems.concat(j.events); renderLog(); $("#moreBtn").style.display = j.events.length >= 50 ? "" : "none";
 }
 $("#chips").addEventListener("click", (e) => {
@@ -701,7 +762,7 @@ function renderStorage() {
 }
 async function loadRec(more) {
   const last = more ? recItems[recItems.length - 1] : null;
-  const j = await api(`/api/recordings?filter=${recFilter}${last ? "&before=" + last.start : ""}`);
+  const j = await api(`/api/recordings?filter=${recFilter}${last ? "&before=" + last.start : ""}${camQ()}`);
   recItems = more ? recItems.concat(j.recordings) : j.recordings;
   storage = j.storage; renderRec(); renderStorage();
   $("#recMore").style.display = j.recordings.length >= 40 ? "" : "none";
@@ -752,8 +813,8 @@ const dayName = (d) => {
   return t.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" });
 };
 async function loadTlDays() {
-  const d = dev(); if (!d) return;
-  const j = await api(`/api/timelapse/${d.serial}`);
+  const sn = tlSerial(); if (!sn) return;
+  const j = await api(`/api/timelapse/${sn}`).catch((e) => { toast(e.message); return { days: [] }; });
   $("#tlDays").innerHTML = j.days.map((x) => `<button class="chip ${x.day === tlDay ? "on" : ""}" data-d="${x.day}">${dayName(x.day)} · ${x.count}</button>`).join("");
   const iv = S.settings?.snapshotMinutes;
   $("#tlInfo").textContent = (iv ? `Elke ${iv >= 60 ? iv / 60 + " uur" : iv + " min"} een foto, plus bij elke gebeurtenis.` : "Automatische foto's staan uit (Instellingen → Foto van de voordeur).") + (S.settings?.timelapseDays ? ` Bewaard: ${S.settings.timelapseDays} dagen.` : "");
@@ -764,9 +825,9 @@ async function loadTlDays() {
 }
 $("#tlDays").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (!b) return; tlDay = b.dataset.d; $("#tlDays").querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === b)); loadTlDay(tlDay, true); });
 async function loadTlDay(day, toEnd) {
-  const d = dev(); if (!d) return;
+  const sn = tlSerial(); if (!sn) return;
   if (tlTimer) tlToggle();
-  tlList = (await api(`/api/timelapse/${d.serial}/${day}`)).frames;
+  tlList = (await api(`/api/timelapse/${sn}/${day}`)).frames;
   $("#tlEmpty").style.display = tlList.length ? "none" : ""; $("#tlImg").style.display = tlList.length ? "" : "none";
   tlIdx = toEnd ? tlList.length - 1 : 0;
   tlDrawLine();
@@ -822,7 +883,7 @@ $("#tlZoom").addEventListener("click", (e) => {
   tlZoom = b.dataset.z; $("#tlZoom").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
   tlDrawLine();
 });
-function tlSrc(i) { return `/api/timelapse/${dev().serial}/${tlDay}/${tlList[i].f}`; }
+function tlSrc(i) { return `/api/timelapse/${tlSerial()}/${tlDay}/${tlList[i].f}`; }
 function tlShow(i) {
   if (!tlList.length) return;
   tlIdx = Math.max(0, Math.min(tlList.length - 1, i));
@@ -851,14 +912,42 @@ function tlVideo() {
   const v = $("#tlv");
   v.oncanplay = () => { $("#tlvWait").style.display = "none"; v.style.display = ""; };
   v.onerror = () => { $("#tlvWait").textContent = "Video maken mislukt"; };
-  v.src = `/api/timelapse/${dev().serial}/${tlDay}/video.mp4?fps=${fps}&t=${Date.now()}`;
+  v.src = `/api/timelapse/${tlSerial()}/${tlDay}/video.mp4?fps=${fps}&t=${Date.now()}`;
 }
-function tlDownload() { toast("Video wordt gemaakt…"); saveFile(`/api/timelapse/${dev().serial}/${tlDay}/video.mp4?fps=${$("#tlSpeed").value}&download=1`, `timelapse-${tlDay}.mp4`); }
+function tlDownload() { toast("Video wordt gemaakt…"); saveFile(`/api/timelapse/${tlSerial()}/${tlDay}/video.mp4?fps=${$("#tlSpeed").value}&download=1`, `timelapse-${tlDay}.mp4`); }
 async function tlDelete() {
   if (!tlDay || !confirm(`Alle timelapse-foto's van ${dayName(tlDay)} wissen?`)) return;
-  await api(`/api/timelapse/${dev().serial}/${tlDay}`, { method: "DELETE" });
+  await api(`/api/timelapse/${tlSerial()}/${tlDay}`, { method: "DELETE" });
   tlDay = null; toast("Gewist"); loadTlDays();
 }
+
+// ---------- beveiliging ----------
+async function loadSecurity() {
+  const j = await api("/api/security").catch(() => null); if (!j) return;
+  let h = `<div class="set"><div><div class="l">Pincode van de app</div><div class="d">${j.appPin ? "Staat aan" : "Uit: iedereen op je netwerk kan het dashboard openen"}</div></div><button class="small" onclick="openAppPin(${j.appPin})">${j.appPin ? "Wijzigen" : "Instellen"}</button></div>`;
+  for (const c of j.cameras) {
+    h += `<div class="set"><div><div class="l">${c.hasPin ? "🔒" : "🔓"} ${esc(c.name)}</div><div class="d">${c.hasPin ? (c.unlocked ? "Eigen pincode · nu ontgrendeld" : "Eigen pincode · vergrendeld") : "Geen eigen pincode"}</div></div>
+      <span style="display:flex;gap:6px">${c.hasPin && c.unlocked ? `<button class="small" onclick="lockCam('${c.serial}')">Vergrendel</button>` : ""}<button class="small" onclick="openCamPin('${c.serial}','${esc(c.name)}',${c.hasPin})">${c.hasPin ? "Wijzigen" : "Pincode"}</button></span></div>`;
+  }
+  h += `<div class="set"><div class="d">Een camera met eigen pincode is pas te zien (beeld, foto's, opnames, timelapse, log en instellingen) als je hem op dit toestel ontgrendelt. Meldingen op je telefoon gaan gewoon door.</div></div>`;
+  $("#secCard").innerHTML = h;
+}
+function pinForm(title, hasCurrent, onSave) {
+  modal(`<div style="font-weight:700;margin-bottom:4px">${title}</div><div class="muted">4 tot 12 cijfers. Laat "Nieuwe pincode" leeg om de pincode uit te zetten.</div>
+    ${hasCurrent ? '<div class="muted" style="margin-top:12px">Huidige pincode</div><input id="pinCur" class="big" type="password" inputmode="numeric" autocomplete="off" style="margin-top:4px">' : ""}
+    <div class="muted" style="margin-top:12px">Nieuwe pincode</div><input id="pinNew" class="big" type="password" inputmode="numeric" autocomplete="new-password" style="margin-top:4px">
+    <div class="muted">Nog een keer</div><input id="pinNew2" class="big" type="password" inputmode="numeric" autocomplete="new-password" style="margin-top:4px">
+    <div class="row"><button onclick="closeModal()">Annuleren</button><button class="primary" id="pinSave">Opslaan</button></div>`);
+  $("#pinSave").onclick = async () => {
+    const n = $("#pinNew").value, n2 = $("#pinNew2").value;
+    if (n !== n2) return toast("De nieuwe pincodes zijn niet hetzelfde");
+    if (n && !/^\d{4,12}$/.test(n)) return toast("Gebruik 4 tot 12 cijfers");
+    if (!n && !confirm("Pincode uitzetten?")) return;
+    try { await onSave($("#pinCur")?.value, n); closeModal(); toast(n ? "Pincode opgeslagen" : "Pincode uitgezet"); loadSecurity(); } catch (e) { toast(e.message); }
+  };
+}
+function openAppPin(has) { pinForm("Pincode van de app", has, (current, pin) => api("/api/pin", { method: "POST", body: { current, pin } })); }
+function openCamPin(sn, name, has) { pinForm("Pincode voor " + name, has, async (current, pin) => { await api(`/api/device/${sn}/pin`, { method: "POST", body: { current, pin } }); await refreshAll(); }); }
 
 // ---------- updates ----------
 let updPoll = null, updFrom = null;
@@ -889,10 +978,14 @@ async function loadAppSettings() {
   const j = await api("/api/settings");
   S.settings = j.settings; storage = j.storage;
   renderAppSettings(); renderStorage();
-  loadUpdate();
+  loadUpdate(); loadSecurity();
 }
 function renderAppSettings() {
   const s = S.settings || {};
+  const multi = S.devices.length > 1;
+  $("#camSect").style.display = $("#camCard").style.display = multi ? "" : "none";
+  if (multi) $("#camCard").innerHTML = `<div class="set"><div><div class="l">Standaard camera</div><div class="d">Deze zie je als eerste als je de app opent</div></div>
+    <select onchange="saveApp({defaultCamera:this.value})"><option value="">Laatst gekozen</option>${S.devices.map((d) => `<option value="${d.serial}" ${d.serial === s.defaultCamera ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>`;
   if (document.activeElement !== $("#gbNum")) { $("#gbNum").value = s.storageGb; $("#gbRange").value = Math.min(500, s.storageGb); }
   $("#autoSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === s.autoDownload));
   if (document.activeElement !== $("#keepDays")) $("#keepDays").value = s.keepDays ?? 0;
@@ -943,6 +1036,12 @@ function settingCtl(s, scope, d) {
 }
 const MAIN = ["motionDetection", "motionDetectionType", "motionDetectionSensitivity", "statusLed", "chimeIndoor", "ringtoneVolume", "speakerVolume", "microphone", "audioRecording", "nightvision", "autoNightvision", "videoStreamingQuality", "videoRecordingQuality", "powerWorkingMode", "recordingClipLength", "watermark"];
 function renderSettings(d) {
+  if (d.locked) {
+    settingsKey = "";
+    $("#settings").innerHTML = `<div class="set"><div class="d">🔒 ${esc(d.name)} is vergrendeld. Ontgrendel hem op het Deur-scherm om de instellingen te zien.</div></div>`;
+    $("#stTitle").style.display = $("#stSettings").style.display = "none";
+    return;
+  }
   const key = JSON.stringify([d.serial, d.settings, d.voices, d.station?.settings, d.enabled]);
   if (key === settingsKey) return; settingsKey = key;
   const row = (s, scope) => { const [l, desc] = NL[s.name] || [s.label, ""]; return `<div class="set"><div><div class="l">${esc(l)}</div>${desc ? `<div class="d">${esc(desc)}</div>` : ""}</div>${settingCtl(s, scope, d)}</div>`; };
@@ -964,6 +1063,7 @@ async function setProp(scope, name, value) {
   catch (e) { toast("Mislukt: " + e.message); settingsKey = ""; renderSettings(d); }
 }
 function renderInfo(d) {
+  if (d.locked) { $("#info").innerHTML = `<div class="set"><div class="l muted">Naam</div><div>${esc(d.name)} 🔒</div></div>`; return; }
   const rows = [["Naam", d.name], ["Model", d.model], ["Serienummer", d.serial], ["Firmware", d.softwareVersion], ["Hardware", d.hardwareVersion],
     ["Batterijtemperatuur", d.batteryTemperature != null ? d.batteryTemperature + " °C" : null], ["Opladen", d.charging != null ? (d.charging ? "Ja" : "Nee") : null],
     ["Wifi-signaal", d.wifiRssi != null ? d.wifiRssi + " dBm" : null], ["Basisstation", d.station && d.station.serial !== d.serial ? `${d.station.name || ""} (${d.station.serial})` : null]].filter((r) => r[1] != null && r[1] !== "");
@@ -999,9 +1099,9 @@ function connectStream() {
         renderDevice(); break;
       }
       case "event":
-        recent.unshift(msg.event); renderRecent();
-        if (!logKind || logKind === msg.event.kind) { logItems.unshift(msg.event); renderLog(); }
-        if (msg.event.kind === "ring") { toast("Er wordt aangebeld!"); navigator.vibrate?.([200, 100, 200]); }
+        if (msg.event.serial === cur) { recent.unshift(msg.event); renderRecent(); }
+        if ((!logKind || logKind === msg.event.kind) && (!camF || camF === msg.event.serial)) { logItems.unshift(msg.event); renderLog(); }
+        if (msg.event.kind === "ring") { toast(`Er wordt aangebeld${S.devices.length > 1 ? " (" + msg.event.device + ")" : ""}!`); navigator.vibrate?.([200, 100, 200]); }
         break;
       case "event-update":
         for (const list of [recent, logItems]) { const i = list.findIndex((e) => e.id === msg.event.id); if (i >= 0) list[i] = msg.event; }
@@ -1018,6 +1118,8 @@ setInterval(() => { if (!isLive && dev()) showPicture(dev()); }, 30000);
 
 async function start() {
   try { S = await api("/api/state"); } catch { return; }
+  const def = S.settings?.defaultCamera;
+  if (def && S.devices.some((d) => d.serial === def)) cur = def;
   renderStatus(); renderDevice();
   loadRecent().catch(() => {});
   connectStream();
