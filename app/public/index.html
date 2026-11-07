@@ -762,7 +762,14 @@ function renderStorage() {
 }
 async function loadRec(more) {
   const last = more ? recItems[recItems.length - 1] : null;
-  const j = await api(`/api/recordings?filter=${recFilter}${last ? "&before=" + last.start : ""}${camQ()}`);
+  let j;
+  try { j = await api(`/api/recordings?filter=${recFilter}${last ? "&before=" + last.start : ""}${camQ()}`); }
+  catch (e) {
+    if (e.message === "login") return;
+    $("#storageCard").innerHTML = `<div class="muted">Opnames laden mislukt: ${esc(e.message)}</div><button class="small" style="margin-top:10px" onclick="loadRec()">Opnieuw</button>`;
+    if (!more) $("#recList").innerHTML = "";
+    return;
+  }
   recItems = more ? recItems.concat(j.recordings) : j.recordings;
   storage = j.storage; renderRec(); renderStorage();
   $("#recMore").style.display = j.recordings.length >= 40 ? "" : "none";
